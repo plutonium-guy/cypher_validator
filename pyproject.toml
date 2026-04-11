@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "cypher_validator"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 description = "Rust-accelerated Cypher query validator, generator, and NL-to-Cypher pipeline via GLiNER2"
 readme = "README.md"
 license = { text = "MIT" }
@@ -22,6 +22,7 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
+    "pydantic>=2.0",
     "gliner2",
     "neo4j>=6.1.0",
     "urllib3>=2.2.3",

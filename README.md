@@ -16,6 +16,7 @@ The core parser and validator are written in **Rust** (via [pyo3](https://pyo3.r
 * [LLM integration](#llm-integration): Schema prompt helpers, extract_cypher_from_text, repair_cypher, format_records, few_shot_examples, cypher_tool_spec, GraphRAGPipeline
 * [LLM NL-to-Cypher pipeline](#llm-nl-to-cypher-pipeline): LLMNLToCypher, ingest_texts, ingest_document, ChunkResult, IngestionResult
 * [Async & parallel ingestion](#async--parallel-ingestion): acall, aingest_texts, aingest_document, TokenBucketRateLimiter
+* [Pydantic Cypher ORM](#pydantic-cypher-orm): NodeModel, RelationshipModel, Query builder, Repository, AgentTools, Traversal, BulkOps
 * [What the validator checks](#what-the-validator-checks)
 * [Generated query types](#generated-query-types)
 * [Performance](#performance)
@@ -51,6 +52,13 @@ The core parser and validator are written in **Rust** (via [pyo3](https://pyo3.r
 | **LLM NL-to-Cypher** | `LLMNLToCypher` generates Cypher from text via any OpenAI-compatible, Anthropic, or LangChain LLM with schema inference, validation, and repair |
 | **Batch text ingestion** | `ingest_texts()` / `ingest_document()` — two-phase batch ingestion with auto-schema stabilization, MERGE-based deduplication, and provenance tracking |
 | **Schema introspection** | `Neo4jDatabase.introspect_schema()` discovers the live DB schema automatically |
+| **Pydantic ORM** | Declarative `NodeModel` / `RelationshipModel` with typed properties, validation, and Cypher generation |
+| **Query builder** | Fluent chainable API: `Query().match(Person, "p").where(p.age > 18).return_(p.name)` |
+| **Repository pattern** | `Repository(Person, db)` with `find_one`, `find_by`, `count`, `exists`, `create`, `merge`, `update`, `delete` |
+| **AI agent tools** | Auto-generated OpenAI / Anthropic function-calling tool specs from your schema |
+| **Graph traversal** | `Traversal.neighbors()`, `shortest_path()`, `subgraph()`, `degree()`, `common_neighbors()` |
+| **Bulk operations** | UNWIND-based batch `create` / `merge` / `delete` for nodes and relationships |
+| **Schema migrations** | `SchemaDDL` auto-generates constraints and indexes; `SchemaDiff` computes migration DDL |
 | **Type stubs** | Full `.pyi` stub files for IDE autocompletion and mypy / pyright type checking |
 
 ---
@@ -1812,6 +1820,225 @@ async with LLMNLToCypher.from_env(schema=schema) as pipeline:
 | `async_llm_fn` | `None` | Async callable `(str) -> Awaitable[str]`. Falls back to `asyncio.to_thread(llm_fn)` if not set |
 | `tpm_limit` | `None` | Tokens-per-minute budget. `None` = no rate limiting |
 | `max_concurrency` | `5` | Default max parallel LLM calls for `aingest_texts()` |
+
+---
+
+## Pydantic Cypher ORM
+
+Define your graph schema as Pydantic models and build validated, parameterized Cypher queries with a fluent API.
+
+### Define models
+
+```python
+from cypher_validator import NodeModel, RelationshipModel
+
+class Person(NodeModel):
+    __label__ = "Person"
+    name: str
+    age: int = 0
+
+class Movie(NodeModel):
+    __label__ = "Movie"
+    title: str
+    year: int
+
+class ActedIn(RelationshipModel):
+    __source__ = Person
+    __target__ = Movie
+    __rel_type__ = "ACTED_IN"
+    roles: list[str] = []
+```
+
+Multi-label nodes: set `__labels__ = ["Person", "Actor"]` for `(:Person:Actor)` patterns.
+
+### Query builder
+
+```python
+from cypher_validator import Query, Cond, NodeRef, fn
+
+# Fluent API
+q = (Query()
+     .match(Person, "p")
+     .where(Cond("p.age", ">", 18))
+     .return_("p.name", "p.age")
+     .order_by("p.name")
+     .limit(10))
+cypher, params = q.build()
+# MATCH (p:Person) WHERE p.age > 18 RETURN p.name, p.age ORDER BY p.name LIMIT 10
+
+# Type-safe property expressions
+p = NodeRef(Person, "p")
+m = NodeRef(Movie, "m")
+q = (Query()
+     .match(p)
+     .where((p.age > 18) & (p.name == "$name"))
+     .return_(p.name, fn.as_(fn.count("*"), "total")))
+
+# Path patterns
+from cypher_validator import PathBuilder
+path = (PathBuilder(Person, "actor")
+        .rel(ActedIn, "r")
+        .to(Movie, "movie")
+        .rel("DIRECTED", direction="in")
+        .to(Person, "director"))
+q = path.to_query().return_("actor.name", "director.name")
+```
+
+Supported clauses: `match`, `optional_match`, `match_path`, `where`, `create`, `merge`, `set`, `set_props`, `remove`, `delete`, `with_`, `return_`, `order_by`, `skip`, `limit`, `unwind`, `call_subquery`, `foreach`, `union`, `raw`.
+
+### Repository pattern
+
+```python
+from cypher_validator import Repository, Neo4jDatabase
+
+db = Neo4jDatabase("bolt://localhost:7687", "neo4j", "password")
+repo = Repository(Person, db)
+
+# CRUD
+repo.create(Person(name="Alice", age=30))
+alice = repo.find_one(name="Alice")         # → Person instance or None
+people = repo.find_by(age=30, limit=10)     # → [Person, ...]
+repo.update({"name": "Alice"}, {"age": 31})
+repo.delete(name="Alice")
+
+# Aggregation
+total = repo.count()
+exists = repo.exists(name="Bob")
+
+# Bulk operations
+repo.create_many([{"name": "A", "age": 1}, {"name": "B", "age": 2}])
+repo.merge_many([{"name": "A", "age": 1}], merge_keys=["name"])
+```
+
+### GraphSession
+
+```python
+from cypher_validator import GraphSession, GraphSchema
+
+schema = GraphSchema.from_models([Person, Movie, ActedIn])
+session = GraphSession(db, schema)
+
+# Model-aware queries
+people = session.query(Person, where={"name": "Alice"})
+session.create(Person(name="Bob", age=25))
+session.bulk_create(Person, [{"name": "C"}, {"name": "D"}])
+session.neighbors(Person, match_props={"name": "Alice"})
+
+# Apply schema DDL (constraints + indexes)
+session.apply_ddl()
+```
+
+Async version: `AsyncGraphSession` with `await session.query(...)`, `await session.create(...)`, etc.
+
+### AI agent tools
+
+```python
+from cypher_validator import AgentTools, ExtendedAgentTools
+
+tools = ExtendedAgentTools(schema)
+
+# OpenAI function-calling specs
+specs = tools.all_tool_specs("openai")
+# → [execute_cypher, create_node, create_relationship, search_nodes,
+#    find_neighbors, find_path, get_graph_schema, bulk_create_nodes]
+
+# Anthropic format
+specs = tools.all_tool_specs("anthropic")
+
+# Handle tool calls from AI agents
+cypher, params = tools.handle_tool_call("create_node", {
+    "label": "Person",
+    "properties": {"name": "Alice", "age": 30}
+})
+# → ('CREATE (n:Person {name: $n_name, age: $n_age}) RETURN n', {'n_name': 'Alice', 'n_age': 30})
+```
+
+### Graph traversal
+
+```python
+from cypher_validator import Traversal
+
+cypher, params = Traversal.neighbors(Person, match_props={"name": "Alice"}, direction="out", limit=10)
+cypher, params = Traversal.shortest_path(Person, Movie, {"name": "Alice"}, {"title": "Matrix"})
+cypher, params = Traversal.subgraph(Person, {"name": "Alice"}, depth=3)
+cypher, params = Traversal.degree(Person, match_props={"name": "Alice"})
+cypher, params = Traversal.common_neighbors(Person, Person, {"name": "Alice"}, {"name": "Bob"})
+cypher, params = Traversal.path_exists(Person, Movie, {"name": "Alice"}, {"title": "Matrix"})
+```
+
+### Bulk operations
+
+```python
+from cypher_validator import BulkOps
+
+# UNWIND-based batch operations (much faster than individual statements)
+cypher, params = BulkOps.bulk_create_nodes(Person, [{"name": "A"}, {"name": "B"}])
+cypher, params = BulkOps.bulk_merge_nodes(Person, items, merge_keys=["name"])
+cypher, params = BulkOps.bulk_create_relationships(ActedIn, items, src_key="src_name", tgt_key="tgt_title")
+cypher, params = BulkOps.bulk_delete_nodes(Person, "name", ["A", "B"])
+```
+
+### Schema management
+
+```python
+from cypher_validator import GraphSchema, SchemaDDL, SchemaDiff
+
+# From Pydantic models
+schema = GraphSchema.from_models([Person, Movie, ActedIn])
+
+# From a live Neo4j database (auto-discovers schema)
+schema = GraphSchema.from_neo4j_db(db)
+
+# From a plain dict (e.g., received from an API)
+schema = GraphSchema.from_dict({
+    "nodes": {"Person": ["name", "age"]},
+    "relationships": {"ACTED_IN": ["Person", "Movie", ["roles"]]}
+})
+
+# Generate DDL
+ddl = SchemaDDL(schema)
+for stmt in ddl.generate_all():
+    db.execute(stmt)
+
+# Compare schemas for migrations
+diff = SchemaDiff(old_schema, new_schema)
+print(diff.summary())
+for stmt in diff.migration_ddl():
+    db.execute(stmt)
+```
+
+### Dynamic model factories
+
+```python
+from cypher_validator import node, relationship
+
+# Create models at runtime (useful for agent-discovered schemas)
+City = node("City", name=(str, ...), population=(int, 0))
+LivesIn = relationship("LIVES_IN", Person, City, since=(int, 2024))
+```
+
+### Cypher function wrappers
+
+```python
+from cypher_validator import fn
+
+fn.count("n")              # count(n)
+fn.count_distinct(p.name)  # count(DISTINCT p.name)
+fn.sum(p.age)              # sum(p.age)
+fn.avg(p.age)              # avg(p.age)
+fn.collect(p.name)         # collect(p.name)
+fn.coalesce(p.name, "'?'") # coalesce(p.name, '?')
+fn.to_lower(p.name)        # toLower(p.name)
+fn.as_(fn.count("*"), "total")  # count(*) AS total
+```
+
+### Query serialization
+
+```python
+# Serialize for agent message passing
+message = q.to_json()
+q2 = Query.from_json(message)  # Full roundtrip
+```
 
 ---
 
