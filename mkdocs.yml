@@ -1,0 +1,113 @@
+site_name: cypher_validator
+site_description: Rust-accelerated Cypher validator, generator, Pydantic ORM, and LLM NL-to-Cypher pipeline
+site_url: https://plutonium-guy.github.io/cypher_validator/
+repo_url: https://github.com/plutonium-guy/cypher_validator
+repo_name: plutonium-guy/cypher_validator
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Quickstart: quickstart.md
+  - Core:
+      - Schema: core/schema.md
+      - Validator: core/validator.md
+      - Generator: core/generator.md
+      - Parser: core/parser.md
+      - Error codes: core/error-codes.md
+  - Pydantic ORM:
+      - Overview: orm/index.md
+      - Models: orm/models.md
+      - Query builder: orm/query-builder.md
+      - Repository: orm/repository.md
+      - Sessions: orm/sessions.md
+      - Bulk ops: orm/bulk.md
+      - Traversal: orm/traversal.md
+      - DDL & migrations: orm/ddl.md
+      - Agent tools: orm/agent-tools.md
+      - API caveats: orm/caveats.md
+  - LLM:
+      - NL → Cypher pipeline: llm/pipeline.md
+      - Graph RAG: llm/rag.md
+      - Tool specs: llm/tools.md
+      - Async & rate-limit: llm/async.md
+  - NER:
+      - GLiNER2 integration: ner/gliner2.md
+  - Development:
+      - Architecture: dev/architecture.md
+      - Testing: dev/testing.md
+      - Performance: dev/performance.md
+      - Contributing: dev/contributing.md
+  - Changelog: changelog.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/plutonium-guy/cypher_validator
+  generator: false
+
+copyright: MIT

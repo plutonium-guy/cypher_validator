@@ -4,6 +4,35 @@ A fast, schema-aware **Cypher query validator and generator** with optional **GL
 
 The core parser and validator are written in **Rust** (via [pyo3](https://pyo3.rs/) and [maturin](https://github.com/PyO3/maturin)) for performance. The GLiNER2 integration layer is pure Python and is an optional add-on.
 
+📚 **Docs:** <https://plutonium-guy.github.io/cypher_validator/>
+
+---
+
+## Running the live integration tests
+
+Most of the test suite runs offline. Around 60 ORM / pipeline tests exercise a real Neo4j instance and skip when no DB is reachable. To run the full suite:
+
+```bash
+docker run -d --name neo4j-cv \
+    -p 7474:7474 -p 7687:7687 \
+    -e NEO4J_AUTH=neo4j/testtest12 \
+    neo4j:5.26-community
+
+export NEO4J_URI=bolt://localhost:7687
+export NEO4J_USERNAME=neo4j         # alias: NEO4J_USER
+export NEO4J_PASSWORD=testtest12    # alias: NEO4J_PASS
+
+pytest tests/ -q
+```
+
+Both env-name conventions (`NEO4J_USERNAME/PASSWORD` and `NEO4J_USER/PASS`) are accepted — `tests/conftest.py` mirrors them at collection time so older test modules and the newer ORM suite agree.
+
+Stop the container when done:
+
+```bash
+docker rm -f neo4j-cv
+```
+
 ---
 
 ## Table of contents
