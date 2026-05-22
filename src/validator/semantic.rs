@@ -54,18 +54,25 @@ fn levenshtein_capped(a: &str, b: &str, cap: usize) -> usize {
 }
 
 /// Return the closest candidate from `candidates` within `max_dist`, or None.
-/// Uses the capped Levenshtein so expensive full-matrix computation is avoided
-/// for strings that are clearly too far apart.
+/// Uses the capped Levenshtein with a shrinking cap so expensive full-matrix
+/// computation is avoided for strings that are clearly too far apart.
 fn closest_match<'a>(name: &str, candidates: &'a [String], max_dist: usize) -> Option<&'a str> {
     let mut best: Option<(&str, usize)> = None;
+    let mut cap = max_dist;
     for c in candidates {
-        let d = levenshtein_capped(name, c, max_dist);
-        if d <= max_dist {
-            match best {
-                None => best = Some((c.as_str(), d)),
-                Some((_, bd)) if d < bd => best = Some((c.as_str(), d)),
-                _ => {}
+        // Cheap early reject: if length delta already exceeds the current cap,
+        // skip the full Levenshtein call.
+        if name.len().abs_diff(c.len()) > cap {
+            continue;
+        }
+        let d = levenshtein_capped(name, c, cap);
+        if d <= cap {
+            best = Some((c.as_str(), d));
+            if d == 0 {
+                return best.map(|(c, _)| c); // exact match — cannot beat
             }
+            // Tighten the cap so subsequent calls bail out earlier.
+            cap = d.saturating_sub(1);
         }
     }
     best.map(|(c, _)| c)
@@ -422,31 +429,30 @@ impl<'a> SemanticValidator<'a> {
 
     fn collect_node_bindings(&mut self, node: &NodePattern) {
         if let Some(var) = &node.variable {
-            let labels = node.labels.clone();
-            self.env.entry(var.clone())
-                .and_modify(|existing| {
-                    for l in &labels {
-                        if !existing.contains(l) {
-                            existing.push(l.clone());
-                        }
+            // Split lookup to avoid cloning `node.labels` when the entry already exists.
+            if let Some(existing) = self.env.get_mut(var.as_str()) {
+                for l in &node.labels {
+                    if !existing.contains(l) {
+                        existing.push(l.clone());
                     }
-                })
-                .or_insert(labels);
+                }
+            } else {
+                self.env.insert(var.clone(), node.labels.clone());
+            }
         }
     }
 
     fn collect_rel_bindings(&mut self, rel: &RelationshipPattern) {
         if let Some(var) = &rel.variable {
-            let types = rel.rel_types.clone();
-            self.env.entry(var.clone())
-                .and_modify(|existing| {
-                    for t in &types {
-                        if !existing.contains(t) {
-                            existing.push(t.clone());
-                        }
+            if let Some(existing) = self.env.get_mut(var.as_str()) {
+                for t in &rel.rel_types {
+                    if !existing.contains(t) {
+                        existing.push(t.clone());
                     }
-                })
-                .or_insert(types);
+                }
+            } else {
+                self.env.insert(var.clone(), rel.rel_types.clone());
+            }
         }
     }
 

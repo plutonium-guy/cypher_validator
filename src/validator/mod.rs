@@ -41,12 +41,13 @@ fn compute_fixed_query(query: &str, diagnostics: &[ValidationDiagnostic]) -> Opt
 
     let mut result = query.to_string();
     // Collect all (original, replacement) pairs, deduplicate, sort longest-first
-    // to avoid substring conflicts
-    let mut replacements: Vec<(&str, &str)> = Vec::new();
+    // to avoid substring conflicts. HashSet dedup avoids O(n²) `Vec::contains`.
+    let mut seen: std::collections::HashSet<(&str, &str)> = std::collections::HashSet::new();
+    let mut replacements: Vec<(&str, &str)> = Vec::with_capacity(error_diags.len());
     for d in &error_diags {
         if let Some(s) = &d.suggestion {
             let pair = (s.original.as_str(), s.replacement.as_str());
-            if !replacements.contains(&pair) {
+            if seen.insert(pair) {
                 replacements.push(pair);
             }
         }

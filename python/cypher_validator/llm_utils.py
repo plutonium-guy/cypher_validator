@@ -34,6 +34,17 @@ _CYPHER_KEYWORDS = frozenset(
      "DELETE", "SET", "REMOVE", "CALL", "UNWIND", "OPTIONAL"]
 )
 
+# Precompiled patterns — extract_cypher_from_text runs once per LLM repair
+# iteration, so the recompile cost is non-trivial on long ingestion runs.
+_RE_FENCED_TAGGED = re.compile(
+    r"```(?:cypher|sql|sparql)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE
+)
+_RE_FENCED_ANY = re.compile(r"```\w*\s*\n(.*?)```", re.DOTALL)
+_RE_BACKTICK = re.compile(r"`([^`\n]+)`")
+_RE_CYPHER_LINE = re.compile(
+    r"^\s*(MATCH|CREATE|MERGE|WITH|CALL|UNWIND|OPTIONAL)\b", re.IGNORECASE
+)
+
 
 def _looks_like_cypher(text: str) -> bool:
     upper = text.upper()
@@ -81,23 +92,19 @@ def extract_cypher_from_text(text: str) -> str:
         return ""
 
     # 1. Fenced block: ```cypher or ```sql or ```
-    m = re.search(
-        r"```(?:cypher|sql|sparql)?\s*\n(.*?)```",
-        text,
-        re.DOTALL | re.IGNORECASE,
-    )
+    m = _RE_FENCED_TAGGED.search(text)
     if m:
         return m.group(1).strip()
 
     # 2. Any fenced block that looks like Cypher
-    m = re.search(r"```\w*\s*\n(.*?)```", text, re.DOTALL)
+    m = _RE_FENCED_ANY.search(text)
     if m:
         candidate = m.group(1).strip()
         if _looks_like_cypher(candidate):
             return candidate
 
     # 3. Inline backtick span
-    m = re.search(r"`([^`\n]+)`", text)
+    m = _RE_BACKTICK.search(text)
     if m:
         candidate = m.group(1).strip()
         if _looks_like_cypher(candidate):
@@ -108,11 +115,7 @@ def extract_cypher_from_text(text: str) -> str:
     lines = text.splitlines()
     start = None
     for i, line in enumerate(lines):
-        if re.match(
-            r"^\s*(MATCH|CREATE|MERGE|WITH|CALL|UNWIND|OPTIONAL)\b",
-            line,
-            re.IGNORECASE,
-        ):
+        if _RE_CYPHER_LINE.match(line):
             start = i
             break
 

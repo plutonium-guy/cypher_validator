@@ -122,7 +122,7 @@ fn collect_single_query(
             for uc in &spq.updating { collect_updating(uc, labels, rels, props); }
             if let Some(ret) = &spq.ret {
                 if let ReturnItems::Items(items) = &ret.items {
-                    for item in items { collect_expr(&item.expr, props); }
+                    for item in items { collect_expr(&item.expr, labels, rels, props); }
                 }
             }
         }
@@ -135,7 +135,7 @@ fn collect_single_query(
             for uc in &mpq.updating { collect_updating(uc, labels, rels, props); }
             if let Some(ret) = &mpq.ret {
                 if let ReturnItems::Items(items) = &ret.items {
-                    for item in items { collect_expr(&item.expr, props); }
+                    for item in items { collect_expr(&item.expr, labels, rels, props); }
                 }
             }
         }
@@ -152,7 +152,7 @@ fn collect_reading(
         ReadingClause::Match(m) => {
             collect_pattern(&m.pattern, labels, rels, props);
             if let Some(w) = &m.where_clause {
-                collect_expr(w, props);
+                collect_expr(w, labels, rels, props);
             }
         }
         ReadingClause::CallSubquery(rq) => {
@@ -200,26 +200,34 @@ fn collect_node_props(node: &NodePattern, props: &mut HashSet<String>) {
     if let Some(MapOrParam::Map(map)) = &node.properties {
         for (key, val) in map {
             props.insert(key.clone());
-            collect_expr(val, props);
+            // Property-value expressions in node maps do not introduce labels/rels.
+            let mut sink_l: HashSet<String> = HashSet::new();
+            let mut sink_r: HashSet<String> = HashSet::new();
+            collect_expr(val, &mut sink_l, &mut sink_r, props);
         }
     }
 }
 
-/// Recursively walk an expression and collect property key names.
-fn collect_expr(expr: &Expr, props: &mut HashSet<String>) {
+/// Recursively walk an expression and collect labels, rel-types, and property key names.
+fn collect_expr(
+    expr: &Expr,
+    labels: &mut HashSet<String>,
+    rels: &mut HashSet<String>,
+    props: &mut HashSet<String>,
+) {
     match expr {
         Expr::Property { expr: inner, key } => {
             props.insert(key.clone());
-            collect_expr(inner, props);
+            collect_expr(inner, labels, rels, props);
         }
         Expr::Subscript { expr: inner, index } => {
-            collect_expr(inner, props);
-            collect_expr(index, props);
+            collect_expr(inner, labels, rels, props);
+            collect_expr(index, labels, rels, props);
         }
         Expr::Slice { expr: inner, from, to } => {
-            collect_expr(inner, props);
-            if let Some(f) = from { collect_expr(f, props); }
-            if let Some(t) = to { collect_expr(t, props); }
+            collect_expr(inner, labels, rels, props);
+            if let Some(f) = from { collect_expr(f, labels, rels, props); }
+            if let Some(t) = to { collect_expr(t, labels, rels, props); }
         }
         Expr::And(a, b) | Expr::Or(a, b) | Expr::Xor(a, b)
         | Expr::Eq(a, b) | Expr::Ne(a, b)
@@ -231,58 +239,77 @@ fn collect_expr(expr: &Expr, props: &mut HashSet<String>) {
         | Expr::In(a, b) | Expr::Regex(a, b)
         | Expr::StartsWith(a, b) | Expr::EndsWith(a, b)
         | Expr::Contains(a, b) => {
-            collect_expr(a, props);
-            collect_expr(b, props);
+            collect_expr(a, labels, rels, props);
+            collect_expr(b, labels, rels, props);
         }
         Expr::Not(inner) | Expr::Neg(inner)
         | Expr::IsNull(inner) | Expr::IsNotNull(inner) => {
-            collect_expr(inner, props);
+            collect_expr(inner, labels, rels, props);
         }
         Expr::FunctionCall { args, .. } => {
-            for arg in args { collect_expr(arg, props); }
+            for arg in args { collect_expr(arg, labels, rels, props); }
         }
         Expr::List(items) => {
-            for item in items { collect_expr(item, props); }
+            for item in items { collect_expr(item, labels, rels, props); }
         }
         Expr::Map(map) => {
-            for val in map.values() { collect_expr(val, props); }
+            for val in map.values() { collect_expr(val, labels, rels, props); }
         }
         Expr::Case { subject, alternatives, default } => {
-            if let Some(s) = subject { collect_expr(s, props); }
+            if let Some(s) = subject { collect_expr(s, labels, rels, props); }
             for (cond, then) in alternatives {
-                collect_expr(cond, props);
-                collect_expr(then, props);
+                collect_expr(cond, labels, rels, props);
+                collect_expr(then, labels, rels, props);
             }
-            if let Some(d) = default { collect_expr(d, props); }
+            if let Some(d) = default { collect_expr(d, labels, rels, props); }
         }
         Expr::ListComprehension { source, filter, projection, .. } => {
-            collect_expr(source, props);
-            if let Some(f) = filter { collect_expr(f, props); }
-            if let Some(p) = projection { collect_expr(p, props); }
+            collect_expr(source, labels, rels, props);
+            if let Some(f) = filter { collect_expr(f, labels, rels, props); }
+            if let Some(p) = projection { collect_expr(p, labels, rels, props); }
         }
         Expr::All { source, filter, .. }
         | Expr::Any { source, filter, .. }
         | Expr::None { source, filter, .. }
         | Expr::Single { source, filter, .. } => {
-            collect_expr(source, props);
-            if let Some(f) = filter { collect_expr(f, props); }
+            collect_expr(source, labels, rels, props);
+            if let Some(f) = filter { collect_expr(f, labels, rels, props); }
         }
-        Expr::Exists(sub) => {
-            if let ExistsSubquery::Query(rq) = sub.as_ref() {
-                let mut l = HashSet::new();
-                let mut r = HashSet::new();
-                collect_regular_query(rq, &mut l, &mut r, props);
+        Expr::Exists(sub) => match sub.as_ref() {
+            ExistsSubquery::Query(rq) => {
+                collect_regular_query(rq, labels, rels, props);
+            }
+            ExistsSubquery::Pattern(pat) => {
+                collect_pattern(pat, labels, rels, props);
+            }
+        },
+        Expr::PatternComprehension { element, filter, projection, .. } => {
+            for label in &element.start.labels { labels.insert(label.clone()); }
+            collect_node_props(&element.start, props);
+            for (rel, node) in &element.chain {
+                for rt in &rel.rel_types { rels.insert(rt.clone()); }
+                for label in &node.labels { labels.insert(label.clone()); }
+                collect_node_props(node, props);
+            }
+            if let Some(f) = filter { collect_expr(f, labels, rels, props); }
+            collect_expr(projection, labels, rels, props);
+        }
+        Expr::ShortestPath { element, .. } => {
+            for label in &element.start.labels { labels.insert(label.clone()); }
+            collect_node_props(&element.start, props);
+            for (rel, node) in &element.chain {
+                for rt in &rel.rel_types { rels.insert(rt.clone()); }
+                for label in &node.labels { labels.insert(label.clone()); }
+                collect_node_props(node, props);
             }
         }
-        Expr::PatternComprehension { element, filter, projection, .. } => {
-            // Traverse filter and projection expressions for property references
-            if let Some(f) = filter { collect_expr(f, props); }
-            collect_expr(projection, props);
+        Expr::Reduce { init, source, projection, .. } => {
+            collect_expr(init, labels, rels, props);
+            collect_expr(source, labels, rels, props);
+            collect_expr(projection, labels, rels, props);
         }
         Expr::CountSubquery(rq) | Expr::CollectSubquery(rq) => {
-            let mut l = HashSet::new();
-            let mut r = HashSet::new();
-            collect_regular_query(rq, &mut l, &mut r, props);
+            collect_regular_query(rq, labels, rels, props);
         }
         // Leaf nodes: Variable, Integer, Float, Str, Bool, Null, Parameter, CountStar
         _ => {}

@@ -1620,8 +1620,6 @@ class NLToCypher:
         else:
             cypher, params = self.converter.convert(relations, mode=mode, **kwargs)
 
-        readable = _inline_params(cypher, params)
-
         if execute:
             if self.db is None:
                 raise RuntimeError(
@@ -1630,9 +1628,9 @@ class NLToCypher:
                     "or via NLToCypher.from_pretrained(..., db=db)."
                 )
             results = self.db.execute(cypher, params) if cypher else []
-            return readable, results
+            return cypher, results
 
-        return readable
+        return cypher
 
     # ------------------------------------------------------------------
 
@@ -1697,8 +1695,6 @@ class NLToCypher:
         else:
             cypher, params = self.converter.convert(relations, mode=mode, **kwargs)
 
-        readable = _inline_params(cypher, params)
-
         if execute:
             if self.db is None:
                 raise RuntimeError(
@@ -1706,9 +1702,9 @@ class NLToCypher:
                     "Pass db=Neo4jDatabase(...) when constructing NLToCypher."
                 )
             results = self.db.execute(cypher, params) if cypher else []
-            return relations, readable, results
+            return relations, cypher, results
 
-        return relations, readable
+        return relations, cypher
 
     def __repr__(self) -> str:
         return (

@@ -56,6 +56,12 @@ from typing import (
 from cypher_validator.llm_utils import extract_cypher_from_text
 
 
+# Precompiled patterns — these run on every LLM response during ingestion.
+_RE_JSON_BLOCK = re.compile(r"```json\s*\n(.*?)```", re.DOTALL)
+_RE_CYPHER_BLOCK = re.compile(r"```cypher\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
+_RE_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
+
+
 # ---------------------------------------------------------------------------
 # Dataclasses for batch ingestion
 # ---------------------------------------------------------------------------
@@ -646,9 +652,7 @@ class LLMNLToCypher:
         schema_dict: Optional[Dict[str, Any]] = None
 
         # Try to find JSON block
-        json_match = re.search(
-            r"```json\s*\n(.*?)```", response, re.DOTALL
-        )
+        json_match = _RE_JSON_BLOCK.search(response)
         if json_match:
             try:
                 parsed = json.loads(json_match.group(1))
@@ -662,9 +666,7 @@ class LLMNLToCypher:
         # Extract the cypher block specifically — extract_cypher_from_text
         # can be confused by multiple fenced blocks, so look for the
         # ```cypher block explicitly first.
-        cypher_match = re.search(
-            r"```cypher\s*\n(.*?)```", response, re.DOTALL | re.IGNORECASE
-        )
+        cypher_match = _RE_CYPHER_BLOCK.search(response)
         if cypher_match:
             cypher = cypher_match.group(1).strip()
         else:
@@ -877,7 +879,7 @@ class LLMNLToCypher:
         3. Start the next chunk rewinding *chunk_overlap* chars of sentences.
         4. A single sentence longer than *chunk_size* becomes its own chunk.
         """
-        sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+        sentences = _RE_SENTENCE_BOUNDARY.split(text.strip())
         if not sentences or (len(sentences) == 1 and not sentences[0]):
             return [text.strip()] if text.strip() else []
 
