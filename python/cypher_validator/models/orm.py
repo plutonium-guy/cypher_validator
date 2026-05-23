@@ -33,8 +33,16 @@ class VectorProperty:
             embedding: list[float] = []
     """
 
+    _VALID_SIMILARITIES = frozenset({"cosine", "euclidean"})
+
     dimensions: int
     similarity: str = "cosine"
+
+    def __post_init__(self) -> None:
+        if self.similarity not in self._VALID_SIMILARITIES:
+            raise ValueError(
+                f"Invalid similarity {self.similarity!r}, must be one of: {', '.join(sorted(self._VALID_SIMILARITIES))}"
+            )
 
 
 # ---------------------------------------------------------------------------

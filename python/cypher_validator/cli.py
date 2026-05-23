@@ -362,7 +362,11 @@ def vector_search(
 
     # Resolve vector
     if vector:
-        query_vec = json.loads(vector)
+        try:
+            query_vec = json.loads(vector)
+        except json.JSONDecodeError as e:
+            typer.echo(f"ERROR: Invalid JSON vector: {e}", err=True)
+            raise typer.Exit(code=1)
     else:
         if not embedding_provider:
             typer.echo("ERROR: --embedding-provider required with --query.", err=True)
@@ -381,14 +385,23 @@ def vector_search(
         if embedding_provider not in providers:
             typer.echo(f"ERROR: Unknown provider '{embedding_provider}'. Use: {', '.join(providers)}", err=True)
             raise typer.Exit(code=1)
-        emb_fn = providers[embedding_provider]()
-        query_vec = emb_fn(query)
+        try:
+            emb_fn = providers[embedding_provider]()
+            query_vec = emb_fn(query)
+        except (ImportError, Exception) as e:
+            typer.echo(f"ERROR: Embedding failed: {e}", err=True)
+            raise typer.Exit(code=1)
 
     # Resolve index name (support "Model.property" syntax)
+    import re
     index_name = index
     if "." in index and not index.startswith("idx_"):
         parts = index.split(".", 1)
         index_name = f"idx_{parts[0].lower()}_{parts[1]}_vector"
+
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", index_name):
+        typer.echo(f"ERROR: Invalid index name: {index_name!r}", err=True)
+        raise typer.Exit(code=1)
 
     # Execute search
     from neo4j import GraphDatabase

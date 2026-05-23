@@ -495,7 +495,6 @@ class GraphSession:
         top_k: int = 10,
     ) -> list[Any]:
         """Vector similarity search using a pre-built vector index."""
-        from cypher_validator.models.query import Query
         label = model.label()
         index_name = f"idx_{label.lower()}_{index_property}_vector"
         q = (Query()
@@ -639,7 +638,6 @@ class AsyncGraphSession:
         top_k: int = 10,
     ) -> list[Any]:
         """Async vector similarity search using a pre-built vector index."""
-        from cypher_validator.models.query import Query
         label = model.label()
         index_name = f"idx_{label.lower()}_{index_property}_vector"
         q = (Query()

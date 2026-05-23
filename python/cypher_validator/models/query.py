@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from enum import Enum
 from typing import (
     Any,
@@ -439,6 +440,8 @@ class Query:
 
     # -- Vector search --
 
+    _INDEX_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
     def vector_search(
         self,
         index_name: str,
@@ -447,6 +450,8 @@ class Query:
         node_var: str = "node",
         score_var: str = "score",
     ) -> Query:
+        if not self._INDEX_NAME_RE.match(index_name):
+            raise ValueError(f"Invalid index name: {index_name!r}")
         pname = self._next_param("vec")
         self._params[pname] = query_vector
         self._clauses.append((
