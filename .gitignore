@@ -71,5 +71,6 @@ docs/_build/
 # Pyenv
 .python-version
 .gitnexus
-models/
 site/
+# un-ignore the Python models package
+!python/cypher_validator/models/
