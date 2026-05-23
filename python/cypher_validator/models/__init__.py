@@ -48,6 +48,7 @@ from cypher_validator.models.orm import (  # noqa: F401
     _python_type_to_json_type,
     node,
     relationship,
+    VectorProperty,
 )
 
 from cypher_validator.models.query import (  # noqa: F401
@@ -107,6 +108,7 @@ __all__ = [
     "_python_type_to_json_type",
     "node",
     "relationship",
+    "VectorProperty",
     # query
     "Op",
     "Cond",

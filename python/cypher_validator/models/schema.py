@@ -342,6 +342,21 @@ class SchemaDDL:
             f'FOR (n:{labels}) ON EACH [{prop_list}]'
         )
 
+    def vector_indexes(self) -> list[str]:
+        """Generate VECTOR INDEX statements for properties declared in __vector_indexes__."""
+        stmts: list[str] = []
+        for m in self.schema.node_models:
+            for prop, vec in getattr(m, "__vector_indexes__", {}).items():
+                label = m.label()
+                name = f"idx_{label.lower()}_{prop}_vector"
+                stmts.append(
+                    f"CREATE VECTOR INDEX {name} IF NOT EXISTS "
+                    f"FOR (n:{label}) ON (n.{prop}) "
+                    f"OPTIONS {{indexConfig: {{`vector.dimensions`: {vec.dimensions}, "
+                    f"`vector.similarity_function`: '{vec.similarity}'}}}}"
+                )
+        return stmts
+
     def custom_constraints(self) -> list[str]:
         """Collect manually-defined constraints from model __constraints__."""
         return self.schema.get_constraints()
@@ -361,6 +376,7 @@ class SchemaDDL:
         if include_existence:
             stmts.extend(self.existence_constraints())
         stmts.extend(self.property_indexes())
+        stmts.extend(self.vector_indexes())
         stmts.extend(self.custom_constraints())
         stmts.extend(self.custom_indexes())
         return stmts
@@ -373,6 +389,8 @@ class SchemaDDL:
                 stmts.append(f"DROP CONSTRAINT uniq_{m.label().lower()}_{prop} IF EXISTS")
             for prop in m.property_names():
                 stmts.append(f"DROP INDEX idx_{m.label().lower()}_{prop} IF EXISTS")
+            for prop in getattr(m, "__vector_indexes__", {}):
+                stmts.append(f"DROP INDEX idx_{m.label().lower()}_{prop}_vector IF EXISTS")
         return stmts
 
 

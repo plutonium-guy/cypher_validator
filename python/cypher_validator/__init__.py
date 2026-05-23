@@ -60,6 +60,7 @@ from cypher_validator.models import (  # noqa: F401
     schema_to_pipeline_kwargs,
     node,
     relationship,
+    VectorProperty,
 )
 from cypher_validator.rag import GraphRAGPipeline  # noqa: F401
 from cypher_validator.llm_pipeline import (  # noqa: F401
@@ -164,4 +165,5 @@ __all__ = [
     "schema_to_pipeline_kwargs",
     "node",
     "relationship",
+    "VectorProperty",
 ]

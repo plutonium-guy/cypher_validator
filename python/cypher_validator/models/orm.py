@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import (
     Any,
     ClassVar,
@@ -11,6 +12,29 @@ from typing import (
 )
 
 from pydantic import BaseModel, ConfigDict
+
+
+# ---------------------------------------------------------------------------
+# Vector property descriptor
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class VectorProperty:
+    """Descriptor for a Neo4j vector index on a node property.
+
+    Usage::
+
+        class Document(NodeModel):
+            __label__ = "Document"
+            __vector_indexes__ = {
+                "embedding": VectorProperty(dimensions=1536, similarity="cosine"),
+            }
+            embedding: list[float] = []
+    """
+
+    dimensions: int
+    similarity: str = "cosine"
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +94,7 @@ class NodeModel(BaseModel, metaclass=_NodeMeta):
     __description__: ClassVar[str] = ""
     __constraints__: ClassVar[list[str]] = []
     __indexes__: ClassVar[list[str]] = []
+    __vector_indexes__: ClassVar[dict[str, VectorProperty]] = {}
 
     @classmethod
     def label(cls) -> str:
