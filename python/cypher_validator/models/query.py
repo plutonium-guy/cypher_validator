@@ -437,6 +437,38 @@ class Query:
         self._clauses.append(("CALL", f"{{\n  {sub_cypher}\n}}"))
         return self
 
+    # -- Vector search --
+
+    def vector_search(
+        self,
+        index_name: str,
+        query_vector: list[float],
+        top_k: int = 10,
+        node_var: str = "node",
+        score_var: str = "score",
+    ) -> Query:
+        pname = self._next_param("vec")
+        self._params[pname] = query_vector
+        self._clauses.append((
+            "CALL",
+            f"db.index.vector.queryNodes('{index_name}', {top_k}, ${pname}) "
+            f"YIELD node AS {node_var}, score AS {score_var}"
+        ))
+        return self
+
+    def vector_search_model(
+        self,
+        model: type,
+        property: str,
+        query_vector: list[float],
+        top_k: int = 10,
+        node_var: str = "node",
+        score_var: str = "score",
+    ) -> Query:
+        label = model.label()
+        index_name = f"idx_{label.lower()}_{property}_vector"
+        return self.vector_search(index_name, query_vector, top_k, node_var, score_var)
+
     # -- FOREACH --
 
     def foreach(self, var: str, list_expr: str, *actions: str) -> Query:

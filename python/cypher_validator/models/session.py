@@ -487,6 +487,36 @@ class GraphSession:
         )
         return self.execute(cypher, params)
 
+    def vector_search(
+        self,
+        model: Type[NodeModel],
+        index_property: str,
+        query_vector: list[float],
+        top_k: int = 10,
+    ) -> list[Any]:
+        """Vector similarity search using a pre-built vector index."""
+        from cypher_validator.models.query import Query
+        label = model.label()
+        index_name = f"idx_{label.lower()}_{index_property}_vector"
+        q = (Query()
+             .vector_search(index_name, query_vector, top_k)
+             .return_("node", "score"))
+        cypher, params = q.build()
+        records = self.execute(cypher, params)
+        return [{"node": model.from_record(r, key="node"), "score": r["score"]} for r in records]
+
+    def semantic_search(
+        self,
+        model: Type[NodeModel],
+        index_property: str,
+        query: str,
+        embedding_fn: Any,
+        top_k: int = 10,
+    ) -> list[Any]:
+        """Embed a text query and run vector similarity search."""
+        vector = embedding_fn(query)
+        return self.vector_search(model, index_property, vector, top_k)
+
     def apply_ddl(self, include_existence: bool = False) -> list[str]:
         """Apply all schema DDL (constraints + indexes) to the database.
 
@@ -600,6 +630,36 @@ class AsyncGraphSession:
     ) -> list[dict[str, Any]]:
         cypher, params = Traversal.neighbors(model, match_props=match_props, **kwargs)
         return await self.execute(cypher, params)
+
+    async def vector_search(
+        self,
+        model: Type[NodeModel],
+        index_property: str,
+        query_vector: list[float],
+        top_k: int = 10,
+    ) -> list[Any]:
+        """Async vector similarity search using a pre-built vector index."""
+        from cypher_validator.models.query import Query
+        label = model.label()
+        index_name = f"idx_{label.lower()}_{index_property}_vector"
+        q = (Query()
+             .vector_search(index_name, query_vector, top_k)
+             .return_("node", "score"))
+        cypher, params = q.build()
+        records = await self.execute(cypher, params)
+        return [{"node": model.from_record(r, key="node"), "score": r["score"]} for r in records]
+
+    async def semantic_search(
+        self,
+        model: Type[NodeModel],
+        index_property: str,
+        query: str,
+        embedding_fn: Any,
+        top_k: int = 10,
+    ) -> list[Any]:
+        """Async: embed a text query and run vector similarity search."""
+        vector = embedding_fn(query)
+        return await self.vector_search(model, index_property, vector, top_k)
 
     async def __aenter__(self) -> AsyncGraphSession:
         return self
