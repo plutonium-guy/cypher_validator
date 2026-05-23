@@ -10,12 +10,12 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union, o
 
 # Re-export Rust core types
 from cypher_validator._cypher_validator import (
-    Schema as Schema,
+    Schema as Schema,  # type: ignore[assignment]
     ValidationResult as ValidationResult,
     ValidationDiagnostic as ValidationDiagnostic,
     CypherValidator as CypherValidator,
     QueryInfo as QueryInfo,
-    CypherGenerator as CypherGenerator,
+    CypherGenerator as CypherGenerator,  # type: ignore[assignment]
     parse_query as parse_query,
 )
 
@@ -516,7 +516,8 @@ class NLToCypher:
         relation_types: List[str],
         mode: str = ...,
         threshold: Optional[float] = ...,
-        execute: Literal[True] = ...,
+        *,
+        execute: Literal[True],
         **kwargs: Any,
     ) -> Tuple[str, List[Dict[str, Any]]]: ...
 
@@ -581,7 +582,8 @@ class NLToCypher:
         relation_types: List[str],
         mode: str = ...,
         threshold: Optional[float] = ...,
-        execute: Literal[True] = ...,
+        *,
+        execute: Literal[True],
         **kwargs: Any,
     ) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]: ...
 
@@ -937,7 +939,8 @@ class LLMNLToCypher:
         self,
         text: str,
         mode: str = ...,
-        execute: Literal[True] = ...,
+        *,
+        execute: Literal[True],
     ) -> Tuple[str, List[Dict[str, Any]]]: ...
 
     def __call__(
@@ -1032,6 +1035,44 @@ class LLMNLToCypher:
     def __repr__(self) -> str: ...
 
 
+# ---------------------------------------------------------------------------
+# Vector support
+# ---------------------------------------------------------------------------
+
+@dataclass
+class VectorProperty:
+    """Declares a vector index on a NodeModel property."""
+    dimensions: int
+    similarity: str = "cosine"
+
+
+# ---------------------------------------------------------------------------
+# Embedding adapters
+# ---------------------------------------------------------------------------
+
+class EmbeddingFn:
+    def __call__(self, text: str) -> List[float]: ...
+
+class BatchEmbeddingFn:
+    def __call__(self, text: str) -> List[float]: ...
+    def batch(self, texts: List[str]) -> List[List[float]]: ...
+
+class OpenAIEmbeddings:
+    def __init__(self, model: str = "text-embedding-3-small", api_key: Optional[str] = None) -> None: ...
+    def __call__(self, text: str) -> List[float]: ...
+    def batch(self, texts: List[str]) -> List[List[float]]: ...
+
+class SentenceTransformerEmbeddings:
+    def __init__(self, model: str = "all-MiniLM-L6-v2") -> None: ...
+    def __call__(self, text: str) -> List[float]: ...
+    def batch(self, texts: List[str]) -> List[List[float]]: ...
+
+class CohereEmbeddings:
+    def __init__(self, model: str = "embed-english-v3.0", api_key: Optional[str] = None) -> None: ...
+    def __call__(self, text: str) -> List[float]: ...
+    def batch(self, texts: List[str]) -> List[List[float]]: ...
+
+
 __all__ = [
     "Schema",
     "CypherValidator",
@@ -1057,4 +1098,12 @@ __all__ = [
     # Batch ingestion
     "ChunkResult",
     "IngestionResult",
+    # Vector support
+    "VectorProperty",
+    # Embedding adapters
+    "EmbeddingFn",
+    "BatchEmbeddingFn",
+    "OpenAIEmbeddings",
+    "SentenceTransformerEmbeddings",
+    "CohereEmbeddings",
 ]
