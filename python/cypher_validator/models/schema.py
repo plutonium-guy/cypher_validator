@@ -152,48 +152,48 @@ class GraphSchema:
             schema_dict = rust_schema.to_dict()
             return cls.from_dict(schema_dict)
 
-        # Fallback: manual introspection via Cypher
-        nodes_dict: dict[str, list[str]] = {}
+        # Fallback: batch introspection via Cypher (2 queries instead of N+1)
+        nodes_dict: dict[str, set[str]] = {}
         rels_dict: dict[str, list[Any]] = {}
 
-        # Discover node labels and properties
         try:
-            label_records = db.execute("CALL db.labels() YIELD label RETURN label")
-            for rec in label_records:
+            records = db.execute(
+                "MATCH (n) "
+                "UNWIND labels(n) AS label "
+                "WITH label, keys(n) AS ks "
+                "UNWIND CASE WHEN size(ks) = 0 THEN [null] ELSE ks END AS k "
+                "RETURN label, collect(DISTINCT k) AS props "
+                f"LIMIT {sample_limit}"
+            )
+            for rec in records:
                 label = rec.get("label", "")
                 if label:
-                    prop_records = db.execute(
-                        f"MATCH (n:{label}) RETURN keys(n) AS props LIMIT 1"
-                    )
-                    props: list[str] = []
-                    if prop_records:
-                        props = prop_records[0].get("props", [])
-                    nodes_dict[label] = props
+                    props = [p for p in rec.get("props", []) if p is not None]
+                    nodes_dict[label] = set(props)
         except Exception:
             pass
 
-        # Discover relationship types
         try:
-            rel_records = db.execute(
-                "CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType"
+            records = db.execute(
+                "MATCH (a)-[r]->(b) "
+                "WITH type(r) AS rtype, labels(a)[0] AS src, labels(b)[0] AS tgt, keys(r) AS ks "
+                "UNWIND CASE WHEN size(ks) = 0 THEN [null] ELSE ks END AS k "
+                "RETURN rtype, head(collect(src)) AS src, head(collect(tgt)) AS tgt, "
+                "collect(DISTINCT k) AS props "
+                f"LIMIT {sample_limit}"
             )
-            for rec in rel_records:
-                rtype = rec.get("relationshipType", "")
+            for rec in records:
+                rtype = rec.get("rtype", "")
                 if rtype:
-                    endpoint_records = db.execute(
-                        f"MATCH (a)-[r:{rtype}]->(b) "
-                        f"RETURN labels(a)[0] AS src, labels(b)[0] AS tgt, keys(r) AS props "
-                        f"LIMIT 1"
-                    )
-                    if endpoint_records:
-                        src = endpoint_records[0].get("src", "Unknown")
-                        tgt = endpoint_records[0].get("tgt", "Unknown")
-                        props = endpoint_records[0].get("props", [])
-                        rels_dict[rtype] = [src, tgt, props]
+                    src = rec.get("src", "Unknown")
+                    tgt = rec.get("tgt", "Unknown")
+                    props = [p for p in rec.get("props", []) if p is not None]
+                    rels_dict[rtype] = [src, tgt, props]
         except Exception:
             pass
 
-        return cls.from_dict({"nodes": nodes_dict, "relationships": rels_dict})
+        nodes_final = {k: list(v) for k, v in nodes_dict.items()}
+        return cls.from_dict({"nodes": nodes_final, "relationships": rels_dict})
 
     def to_json(self) -> str:
         d = self.to_dict()

@@ -25,6 +25,8 @@ class AgentTools:
 
     def __init__(self, schema: GraphSchema) -> None:
         self.schema = schema
+        self._label_map = {m.label(): m for m in schema.node_models}
+        self._rel_type_map = {m.rel_type(): m for m in schema.rel_models}
 
     def query_tool_spec(self, format: str = "openai") -> dict[str, Any]:
         """Tool spec for generating Cypher queries.
@@ -201,11 +203,10 @@ class AgentTools:
         elif tool_name == "create_node":
             label = arguments["label"]
             props = arguments.get("properties", {})
-            # Find matching model
-            for m in self.schema.node_models:
-                if m.label() == label:
-                    instance = m(**props)
-                    return instance.to_create_cypher()
+            m = self._label_map.get(label)
+            if m:
+                instance = m(**props)
+                return instance.to_create_cypher()
             # Fallback: raw create
             params = {f"n_{k}": v for k, v in props.items()}
             prop_str = ", ".join(f"{k}: $n_{k}" for k in props)
@@ -215,12 +216,12 @@ class AgentTools:
             src_match = arguments.get("source_match", {})
             tgt_match = arguments.get("target_match", {})
             rel_props = arguments.get("properties", {})
-            for m in self.schema.rel_models:
-                if m.rel_type() == rel_type_str:
-                    instance = m(**rel_props)
-                    return instance.to_create_cypher(
-                        src_match=src_match, tgt_match=tgt_match
-                    )
+            m = self._rel_type_map.get(rel_type_str)
+            if m:
+                instance = m(**rel_props)
+                return instance.to_create_cypher(
+                    src_match=src_match, tgt_match=tgt_match
+                )
             return None
         return None
 
@@ -476,24 +477,23 @@ class ExtendedAgentTools(AgentTools):
             filters = arguments.get("filters", {})
             limit = arguments.get("limit", 25)
             order_by = arguments.get("order_by")
-            # Find model
-            for m in self.schema.node_models:
-                if m.label() == label:
-                    q = Query().match(m, "n")
-                    params: dict[str, Any] = {}
-                    if filters:
-                        where_parts = []
-                        for k, v in filters.items():
-                            params[f"n_{k}"] = v
-                            where_parts.append(f"n.{k} = $n_{k}")
-                        q = q.where(" AND ".join(where_parts))
-                    q = q.return_("n")
-                    if order_by:
-                        q = q.order_by(f"n.{order_by}")
-                    q = q.limit(limit)
-                    cypher = q.build_cypher()
-                    return cypher, params
-            return None
+            m = self._label_map.get(label)
+            if not m:
+                return None
+            q = Query().match(m, "n")
+            params: dict[str, Any] = {}
+            if filters:
+                where_parts = []
+                for k, v in filters.items():
+                    params[f"n_{k}"] = v
+                    where_parts.append(f"n.{k} = $n_{k}")
+                q = q.where(" AND ".join(where_parts))
+            q = q.return_("n")
+            if order_by:
+                q = q.order_by(f"n.{order_by}")
+            q = q.limit(limit)
+            cypher = q.build_cypher()
+            return cypher, params
 
         elif tool_name == "find_neighbors":
             label = arguments["label"]
@@ -501,13 +501,13 @@ class ExtendedAgentTools(AgentTools):
             rel_type = arguments.get("relationship_type")
             direction = arguments.get("direction", "both")
             limit = arguments.get("limit", 25)
-            for m in self.schema.node_models:
-                if m.label() == label:
-                    return Traversal.neighbors(
-                        m, match_props=match_props,
-                        rel_type=rel_type, direction=direction, limit=limit,
-                    )
-            return None
+            m = self._label_map.get(label)
+            if not m:
+                return None
+            return Traversal.neighbors(
+                m, match_props=match_props,
+                rel_type=rel_type, direction=direction, limit=limit,
+            )
 
         elif tool_name == "find_path":
             src_label = arguments["source_label"]
@@ -515,12 +515,8 @@ class ExtendedAgentTools(AgentTools):
             src_props = arguments["source_properties"]
             tgt_props = arguments["target_properties"]
             max_depth = arguments.get("max_depth", 5)
-            src_model = tgt_model = None
-            for m in self.schema.node_models:
-                if m.label() == src_label:
-                    src_model = m
-                if m.label() == tgt_label:
-                    tgt_model = m
+            src_model = self._label_map.get(src_label)
+            tgt_model = self._label_map.get(tgt_label)
             if src_model and tgt_model:
                 return Traversal.shortest_path(
                     src_model, tgt_model, src_props, tgt_props, max_depth=max_depth,
@@ -539,9 +535,9 @@ class ExtendedAgentTools(AgentTools):
         elif tool_name == "bulk_create_nodes":
             label = arguments["label"]
             items = arguments["items"]
-            for m in self.schema.node_models:
-                if m.label() == label:
-                    return BulkOps.bulk_create_nodes(m, items)
+            m = self._label_map.get(label)
+            if m:
+                return BulkOps.bulk_create_nodes(m, items)
             return None
 
         return None

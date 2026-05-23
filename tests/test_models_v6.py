@@ -229,16 +229,12 @@ class TestGraphSchemaFromNeo4jDb:
         mock_db = MagicMock()
         del mock_db.introspect_schema  # Force fallback path
 
-        # Mock execute for label discovery
+        # Mock execute for batch introspection queries
         def mock_execute(cypher, params=None):
-            if "db.labels" in cypher:
-                return [{"label": "Item"}]
-            if "keys(n)" in cypher:
-                return [{"props": ["name", "price"]}]
-            if "db.relationshipTypes" in cypher:
-                return [{"relationshipType": "CONTAINS"}]
-            if "labels(a)" in cypher:
-                return [{"src": "Item", "tgt": "Item", "props": ["qty"]}]
+            if "UNWIND labels(n)" in cypher:
+                return [{"label": "Item", "props": ["name", "price"]}]
+            if "type(r) AS rtype" in cypher:
+                return [{"rtype": "CONTAINS", "src": "Item", "tgt": "Item", "props": ["qty"]}]
             return []
 
         mock_db.execute = mock_execute

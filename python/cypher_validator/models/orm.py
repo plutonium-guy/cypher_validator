@@ -66,20 +66,12 @@ class _NodeMeta(type(BaseModel)):
 
     def __init__(self, name: str, bases: tuple, namespace: dict, **kwargs: Any) -> None:
         super().__init__(name, bases, namespace, **kwargs)
-        if name != "NodeModel" and any(
-            b.__name__ == "NodeModel" for b in bases
-        ):
+        if name == "NodeModel":
+            return
+        if any(b.__name__ == "NodeModel" or hasattr(b, "__label__") for b in bases):
             label = getattr(self, "__label__", name)
             self.__label__ = label  # type: ignore[attr-defined]
             _NODE_REGISTRY[label] = self  # type: ignore[arg-type]
-        elif name != "NodeModel":
-            # Handle deeper inheritance
-            for b in bases:
-                if hasattr(b, "__label__"):
-                    label = getattr(self, "__label__", name)
-                    self.__label__ = label  # type: ignore[attr-defined]
-                    _NODE_REGISTRY[label] = self  # type: ignore[arg-type]
-                    break
 
 
 class NodeModel(BaseModel, metaclass=_NodeMeta):
@@ -247,25 +239,22 @@ class _RelMeta(type(BaseModel)):
 
     def __init__(self, name: str, bases: tuple, namespace: dict, **kwargs: Any) -> None:
         super().__init__(name, bases, namespace, **kwargs)
-        if name != "RelationshipModel" and any(
-            b.__name__ == "RelationshipModel" for b in bases
-        ):
+        if name == "RelationshipModel":
+            return
+        if any(b.__name__ == "RelationshipModel" or hasattr(b, "__rel_type__") for b in bases):
             rel_type = getattr(self, "__rel_type__", _to_upper_snake(name))
             self.__rel_type__ = rel_type  # type: ignore[attr-defined]
             _REL_REGISTRY[rel_type] = self  # type: ignore[arg-type]
-        elif name != "RelationshipModel":
-            for b in bases:
-                if hasattr(b, "__rel_type__"):
-                    rel_type = getattr(self, "__rel_type__", _to_upper_snake(name))
-                    self.__rel_type__ = rel_type  # type: ignore[attr-defined]
-                    _REL_REGISTRY[rel_type] = self  # type: ignore[arg-type]
-                    break
+
+
+_CAMEL_RE1 = re.compile(r"([A-Z]+)([A-Z][a-z])")
+_CAMEL_RE2 = re.compile(r"([a-z\d])([A-Z])")
 
 
 def _to_upper_snake(name: str) -> str:
     """CamelCase → UPPER_SNAKE_CASE."""
-    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
-    s = re.sub(r"([a-z\d])([A-Z])", r"\1_\2", s)
+    s = _CAMEL_RE1.sub(r"\1_\2", name)
+    s = _CAMEL_RE2.sub(r"\1_\2", s)
     return s.upper()
 
 

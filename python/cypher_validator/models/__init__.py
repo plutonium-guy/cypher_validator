@@ -34,68 +34,6 @@ Example::
     validator = CypherValidator(schema.to_cypher_schema())
 """
 
-# Re-export everything for backwards compatibility.
-# All existing `from cypher_validator.models import X` imports continue to work.
-
-from cypher_validator.models.orm import (  # noqa: F401
-    _NODE_REGISTRY,
-    _REL_REGISTRY,
-    _NodeMeta,
-    NodeModel,
-    _RelMeta,
-    _to_upper_snake,
-    RelationshipModel,
-    _python_type_to_json_type,
-    node,
-    relationship,
-    VectorProperty,
-)
-
-from cypher_validator.models.query import (  # noqa: F401
-    Op,
-    Cond,
-    CondGroup,
-    RawExpr,
-    Query,
-    QueryStep,
-    QueryPlan,
-    QueryResult,
-    PropExpr,
-    NodeRef,
-    RelRef,
-    _orig_match,
-    _orig_return,
-    _match_with_ref,
-    _return_with_ref,
-    QueryHistoryEntry,
-    QueryHistory,
-    CypherFn,
-    fn,
-    PathBuilder,
-)
-
-from cypher_validator.models.schema import (  # noqa: F401
-    GraphSchema,
-    SchemaDDL,
-    SchemaDiff,
-    schema_to_pipeline_kwargs,
-)
-
-from cypher_validator.models.session import (  # noqa: F401
-    _VALID_DIRECTIONS,
-    _validate_direction,
-    Traversal,
-    BulkOps,
-    GraphSession,
-    AsyncGraphSession,
-    Repository,
-)
-
-from cypher_validator.models.agents import (  # noqa: F401
-    AgentTools,
-    ExtendedAgentTools,
-)
-
 __all__ = [
     # orm
     "_NODE_REGISTRY",
@@ -147,3 +85,60 @@ __all__ = [
     "AgentTools",
     "ExtendedAgentTools",
 ]
+
+_SUBMODULE_MAP = {
+    "_NODE_REGISTRY": "cypher_validator.models.orm",
+    "_REL_REGISTRY": "cypher_validator.models.orm",
+    "_NodeMeta": "cypher_validator.models.orm",
+    "NodeModel": "cypher_validator.models.orm",
+    "_RelMeta": "cypher_validator.models.orm",
+    "_to_upper_snake": "cypher_validator.models.orm",
+    "RelationshipModel": "cypher_validator.models.orm",
+    "_python_type_to_json_type": "cypher_validator.models.orm",
+    "node": "cypher_validator.models.orm",
+    "relationship": "cypher_validator.models.orm",
+    "VectorProperty": "cypher_validator.models.orm",
+    "Op": "cypher_validator.models.query",
+    "Cond": "cypher_validator.models.query",
+    "CondGroup": "cypher_validator.models.query",
+    "RawExpr": "cypher_validator.models.query",
+    "Query": "cypher_validator.models.query",
+    "QueryStep": "cypher_validator.models.query",
+    "QueryPlan": "cypher_validator.models.query",
+    "QueryResult": "cypher_validator.models.query",
+    "PropExpr": "cypher_validator.models.query",
+    "NodeRef": "cypher_validator.models.query",
+    "RelRef": "cypher_validator.models.query",
+    "_orig_match": "cypher_validator.models.query",
+    "_orig_return": "cypher_validator.models.query",
+    "_match_with_ref": "cypher_validator.models.query",
+    "_return_with_ref": "cypher_validator.models.query",
+    "QueryHistoryEntry": "cypher_validator.models.query",
+    "QueryHistory": "cypher_validator.models.query",
+    "CypherFn": "cypher_validator.models.query",
+    "fn": "cypher_validator.models.query",
+    "PathBuilder": "cypher_validator.models.query",
+    "GraphSchema": "cypher_validator.models.schema",
+    "SchemaDDL": "cypher_validator.models.schema",
+    "SchemaDiff": "cypher_validator.models.schema",
+    "schema_to_pipeline_kwargs": "cypher_validator.models.schema",
+    "_VALID_DIRECTIONS": "cypher_validator.models.session",
+    "_validate_direction": "cypher_validator.models.session",
+    "Traversal": "cypher_validator.models.session",
+    "BulkOps": "cypher_validator.models.session",
+    "GraphSession": "cypher_validator.models.session",
+    "AsyncGraphSession": "cypher_validator.models.session",
+    "Repository": "cypher_validator.models.session",
+    "AgentTools": "cypher_validator.models.agents",
+    "ExtendedAgentTools": "cypher_validator.models.agents",
+}
+
+
+def __getattr__(name: str):
+    if name in _SUBMODULE_MAP:
+        import importlib
+        mod = importlib.import_module(_SUBMODULE_MAP[name])
+        val = getattr(mod, name)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
