@@ -62,6 +62,13 @@ from cypher_validator.models import (  # noqa: F401
     relationship,
     VectorProperty,
 )
+from cypher_validator.embeddings import (  # noqa: F401
+    EmbeddingFn,
+    BatchEmbeddingFn,
+    OpenAIEmbeddings,
+    SentenceTransformerEmbeddings,
+    CohereEmbeddings,
+)
 from cypher_validator.rag import GraphRAGPipeline  # noqa: F401
 from cypher_validator.llm_pipeline import (  # noqa: F401
     LLMNLToCypher,
@@ -125,6 +132,12 @@ __all__ = [
     "repair_cypher",
     "cypher_tool_spec",
     "few_shot_examples",
+    # Embedding adapters
+    "EmbeddingFn",
+    "BatchEmbeddingFn",
+    "OpenAIEmbeddings",
+    "SentenceTransformerEmbeddings",
+    "CohereEmbeddings",
     # RAG pipeline
     "GraphRAGPipeline",
     # LLM NL-to-Cypher pipeline
