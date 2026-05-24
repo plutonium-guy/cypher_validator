@@ -108,6 +108,37 @@ ddl.fulltext_index([Person, Movie], ["name", "title"], "search_all")
 # 'CREATE FULLTEXT INDEX search_all IF NOT EXISTS FOR (n:Person|Movie) ON EACH [n.name, n.title]'
 ```
 
+### `vector_indexes() → list[str]`
+
+Generate `CREATE VECTOR INDEX` for every property declared in `__vector_indexes__` on
+any node model. Requires Neo4j 5.11+.
+
+```python
+from cypher_validator import NodeModel, VectorProperty, GraphSchema, SchemaDDL
+
+class Document(NodeModel):
+    __label__ = "Document"
+    __vector_indexes__ = {
+        "embedding": VectorProperty(dimensions=1536, similarity="cosine"),
+    }
+    title: str
+    embedding: list[float] = []
+
+schema = GraphSchema.from_models([Document])
+ddl = SchemaDDL(schema)
+
+ddl.vector_indexes()
+# [
+#   "CREATE VECTOR INDEX idx_document_embedding_vector IF NOT EXISTS "
+#   "FOR (n:Document) ON (n.embedding) "
+#   "OPTIONS {indexConfig: {`vector.dimensions`: 1536, `vector.similarity_function`: 'cosine'}}"
+# ]
+```
+
+Index name pattern: `idx_<label_lower>_<prop>_vector`.
+
+`generate_all()` includes vector indexes automatically. `drop_all()` drops them too.
+
 ### `custom_constraints() / custom_indexes()`
 
 Return whatever DDL strings you declared via the model's `__constraints__` and
@@ -139,7 +170,7 @@ for stmt in ddl.generate_all(include_existence=True):
 ```
 
 Order: `uniqueness_constraints` → (optional) `existence_constraints` →
-`property_indexes` → `custom_constraints` → `custom_indexes`.
+`property_indexes` → `vector_indexes` → `custom_constraints` → `custom_indexes`.
 
 ### `drop_all() → list[str]`
 
@@ -153,8 +184,8 @@ for stmt in ddl.drop_all():
 ```
 
 !!! warning "drop_all is not a perfect inverse of generate_all"
-    `drop_all` only drops the uniqueness constraints and property indexes
-    automatically derived from models. It does **not** drop existence
+    `drop_all` drops uniqueness constraints, property indexes, and vector
+    indexes automatically derived from models. It does **not** drop existence
     constraints, composite indexes, fulltext indexes, or custom DDL — those
     don't follow the canonical name pattern.
 

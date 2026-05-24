@@ -88,6 +88,7 @@ nav:
       - Bulk ops: orm/bulk.md
       - Traversal: orm/traversal.md
       - DDL & migrations: orm/ddl.md
+      - Vector search: orm/vector.md
       - Agent tools: orm/agent-tools.md
       - API caveats: orm/caveats.md
   - LLM:

@@ -112,6 +112,34 @@ path = session.shortest_path(
 These call [`Traversal.neighbors`](traversal.md) / [`Traversal.shortest_path`](traversal.md)
 and execute the result.
 
+### Vector search
+
+```python
+results = session.vector_search(
+    Document, "embedding", query_vector, top_k=5
+)
+# Returns list of {"node": Document(...), "score": 0.95}
+```
+
+`vector_search(model, index_property, query_vector, top_k=10)` derives the vector index
+name from the model's label and property, executes the search, and hydrates the results
+into Pydantic model instances.
+
+`semantic_search()` adds an embedding step — pass text instead of a vector:
+
+```python
+from cypher_validator.embeddings import OpenAIEmbeddings
+embed = OpenAIEmbeddings()
+
+results = session.semantic_search(
+    Document, "embedding", "what is graph RAG?", embed, top_k=5
+)
+```
+
+Both methods are available on `GraphSession` and `AsyncGraphSession` (use `await` for async).
+
+See [Vector search](vector.md) for the full workflow including index creation and embedding adapters.
+
 ### `apply_ddl(include_existence=False) → list[str]`
 
 ```python

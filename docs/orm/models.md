@@ -31,6 +31,7 @@ class Person(NodeModel):
 | `__description__` | `str` | `""` | Human / LLM description. Surfaces in `to_schema_description()`. |
 | `__constraints__` | `list[str]` | `[]` | Custom Cypher DDL — picked up by [`SchemaDDL.custom_constraints`](ddl.md). |
 | `__indexes__` | `list[str]` | `[]` | Custom Cypher DDL — picked up by [`SchemaDDL.custom_indexes`](ddl.md). |
+| `__vector_indexes__` | `dict[str, VectorProperty]` | `{}` | Vector index declarations — picked up by [`SchemaDDL.vector_indexes`](ddl.md). See [Vector search](vector.md). |
 
 ### Class methods
 
@@ -93,6 +94,31 @@ from cypher_validator import GraphSchema
 schema = GraphSchema.from_registry()
 assert any(m.label() == "Movie" for m in schema.node_models)
 ```
+
+### `VectorProperty`
+
+Declare vector indexes on node properties for similarity search (Neo4j 5.11+):
+
+```python
+from cypher_validator import NodeModel, VectorProperty
+
+class Document(NodeModel):
+    __label__ = "Document"
+    __vector_indexes__ = {
+        "embedding": VectorProperty(dimensions=1536, similarity="cosine"),
+    }
+    title: str
+    embedding: list[float] = []
+```
+
+| Parameter | Type | Default | Notes |
+|---|---|---|---|
+| `dimensions` | `int` | required | Vector dimensionality (e.g. 1536 for OpenAI `text-embedding-3-small`). |
+| `similarity` | `str` | `"cosine"` | `"cosine"` or `"euclidean"`. |
+
+`SchemaDDL.vector_indexes()` reads these declarations to generate `CREATE VECTOR INDEX`
+statements. `SchemaDDL.generate_all()` includes them automatically, and `drop_all()` drops
+them. See [DDL](ddl.md#vector_indexes) and [Vector search](vector.md) for the full workflow.
 
 ## `RelationshipModel`
 

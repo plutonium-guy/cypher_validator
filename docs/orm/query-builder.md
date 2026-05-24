@@ -274,6 +274,43 @@ q.where(c)
 `&` and `|` return `CondGroup` objects. Parentheses are added automatically when a
 nested group has a different operator from its parent.
 
+## Vector search
+
+`vector_search()` generates a `CALL db.index.vector.queryNodes(...)` clause for Neo4j
+vector similarity search (5.11+):
+
+```python
+q = (Query()
+     .vector_search("idx_document_embedding_vector", query_vector, top_k=5)
+     .return_("node.title", "score"))
+cypher, params = q.build()
+# CALL db.index.vector.queryNodes('idx_document_embedding_vector', 5, $vec_1)
+#   YIELD node AS node, score AS score
+# RETURN node.title, score
+```
+
+### `vector_search(index_name, query_vector, top_k=10, node_var="node", score_var="score")`
+
+| Parameter | Type | Default | Notes |
+|---|---|---|---|
+| `index_name` | `str` | required | Must match `^[A-Za-z_][A-Za-z0-9_]*$` (prevents Cypher injection). |
+| `query_vector` | `list[float]` | required | Auto-parameterised as `$vec_N`. |
+| `top_k` | `int` | `10` | Number of nearest neighbors. |
+| `node_var` | `str` | `"node"` | YIELD alias for the matched node. |
+| `score_var` | `str` | `"score"` | YIELD alias for the similarity score. |
+
+### `vector_search_model(model, property, query_vector, top_k=10, ...)`
+
+Convenience wrapper that derives the index name from the model's label and property
+using the canonical `idx_<label_lower>_<prop>_vector` pattern:
+
+```python
+q = Query().vector_search_model(Document, "embedding", query_vector, top_k=5)
+# Uses index_name = "idx_document_embedding_vector"
+```
+
+See [Vector search](vector.md) for the full end-to-end workflow.
+
 ## `RawExpr`
 
 The escape hatch for arbitrary Cypher expressions:

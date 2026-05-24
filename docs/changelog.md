@@ -3,9 +3,30 @@
 Reverse-chronological. Versions follow [SemVer](https://semver.org/) and
 correspond to git tags. The "Unreleased" section accumulates between tags.
 
-## Unreleased
+## v0.13.0 — Vector search & models split
+
+### Added
+
+- **`models.py` split into package.** The 3641-line `models.py` is now a
+  `models/` package with focused modules: `orm.py`, `query.py`, `schema.py`,
+  `session.py`, `agents.py`. All public imports are unchanged via PEP 562
+  lazy `__getattr__` re-exports.
+- **Full-stack vector search support.** `VectorProperty` descriptor on
+  `NodeModel.__vector_indexes__` for declaring vector indexes.
+  `SchemaDDL.vector_indexes()` generates `CREATE VECTOR INDEX` DDL (Neo4j 5.11+).
+  `Query.vector_search()` / `vector_search_model()` for the query builder.
+  `GraphSession.vector_search()` / `semantic_search()` and async equivalents
+  on `AsyncGraphSession`.
+- **Embedding adapters.** `cypher_validator.embeddings` module with
+  `OpenAIEmbeddings`, `SentenceTransformerEmbeddings`, `CohereEmbeddings`
+  adapters. `EmbeddingFn` / `BatchEmbeddingFn` runtime-checkable protocols.
+- **CLI vector search.** `cypher vector-search` subcommand with `--vector`,
+  `--text`, `--provider`, `--top-k` options.
 
 ### Fixed
+
+- **Vector index name injection.** `Query.vector_search()` validates index
+  names against `^[A-Za-z_][A-Za-z0-9_]*$` to prevent Cypher injection.
 
 - **NLToCypher returns parameterized Cypher.** The GLiNER2 pipeline no longer
   inlines entity literals via `_inline_params` before returning the query
@@ -20,6 +41,15 @@ correspond to git tags. The "Unreleased" section accumulates between tags.
 
 ### Performance
 
+- **ORM metaclass** — single-pass `__init__` replaces two-pass
+  `__init__` + `__init_subclass__` pattern. Regex compiled at module level.
+- **Lazy imports** — `models/__init__.py` uses PEP 562 `__getattr__` so
+  `import cypher_validator.models` only loads submodules on first access.
+- **Agent tool lookups** — `AgentTools` / `ExtendedAgentTools` build
+  `label→model` and `rel_type→model` dicts at init for O(1) dispatch
+  instead of linear scans.
+- **Batch DB introspection** — `GraphSchema.from_neo4j_db()` uses 2 batch
+  queries (nodes + rels) instead of N+1 individual queries.
 - `closest_match` — shrinking cap on each hit + length-delta pre-filter +
   early return on exact match.
 - `compute_fixed_query` — `HashSet` dedup replaces an O(n²) `Vec::contains`
