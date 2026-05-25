@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Biomedical Knowledge Graph Explorer</title>
+<script src="https://unpkg.com/3d-force-graph@1.73.4/dist/3d-force-graph.min.js"></script>
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.160.0/examples/js/renderers/CSS2DRenderer.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Inter', -apple-system, sans-serif; background: #0a0a1a; color: #e0e0e0; overflow: hidden; }
+
+#graph-container { width: 100vw; height: 100vh; }
+
+/* Top bar */
+.top-bar {
+    position: fixed; top: 0; left: 0; right: 0; height: 48px;
+    background: rgba(15, 15, 35, 0.95); border-bottom: 1px solid #2a2a4a;
+    display: flex; align-items: center; padding: 0 16px; z-index: 100;
+    backdrop-filter: blur(10px);
+}
+.top-bar h1 { font-size: 16px; font-weight: 600; color: #8b9cf7; }
+.top-bar .stats { margin-left: auto; font-size: 12px; color: #888; }
+
+/* Side panels */
+.panel {
+    position: fixed; top: 48px; width: 380px; background: rgba(15, 15, 35, 0.95);
+    border: 1px solid #2a2a4a; z-index: 90; overflow-y: auto;
+    max-height: calc(100vh - 48px); backdrop-filter: blur(10px);
+}
+.panel-left { left: 0; border-left: none; border-top: none; }
+.panel-right { right: 0; border-right: none; border-top: none; display: none; }
+
+.panel-header {
+    padding: 12px 16px; border-bottom: 1px solid #2a2a4a;
+    font-size: 13px; font-weight: 600; color: #8b9cf7;
+    display: flex; align-items: center; justify-content: space-between;
+}
+.panel-body { padding: 12px 16px; }
+.panel-close { cursor: pointer; color: #666; font-size: 18px; }
+.panel-close:hover { color: #fff; }
+
+/* Tabs */
+.tabs { display: flex; border-bottom: 1px solid #2a2a4a; }
+.tab {
+    padding: 8px 16px; font-size: 12px; cursor: pointer;
+    color: #888; border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+}
+.tab:hover { color: #e0e0e0; }
+.tab.active { color: #8b9cf7; border-bottom-color: #8b9cf7; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Controls */
+.filter-group { margin-bottom: 12px; }
+.filter-group label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.checkbox-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip {
+    padding: 4px 10px; font-size: 11px; border-radius: 12px;
+    cursor: pointer; border: 1px solid #3a3a5a; transition: all 0.2s;
+    user-select: none;
+}
+.chip:hover { border-color: #8b9cf7; }
+.chip.active { background: #8b9cf7; color: #0a0a1a; border-color: #8b9cf7; }
+
+/* Input */
+input, textarea, select {
+    width: 100%; padding: 8px 12px; background: #1a1a2e; border: 1px solid #3a3a5a;
+    border-radius: 6px; color: #e0e0e0; font-size: 13px; outline: none;
+    font-family: inherit;
+}
+input:focus, textarea:focus { border-color: #8b9cf7; }
+textarea { resize: vertical; min-height: 60px; }
+
+.btn {
+    padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer;
+    font-size: 12px; font-weight: 600; transition: all 0.2s;
+}
+.btn-primary { background: #8b9cf7; color: #0a0a1a; }
+.btn-primary:hover { background: #a0aeff; }
+.btn-danger { background: #e74c5a; color: white; }
+.btn-danger:hover { background: #ff5a6a; }
+.btn-secondary { background: #2a2a4a; color: #e0e0e0; }
+.btn-secondary:hover { background: #3a3a5a; }
+.btn-sm { padding: 4px 10px; font-size: 11px; }
+.btn-group { display: flex; gap: 6px; margin-top: 10px; }
+
+/* NL Query */
+.query-box { position: relative; }
+.query-box input { padding-right: 70px; }
+.query-box .btn { position: absolute; right: 4px; top: 4px; }
+
+/* Results */
+.result-card {
+    background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 8px;
+    padding: 10px; margin-bottom: 8px; font-size: 12px;
+}
+.result-card .label { font-size: 10px; color: #8b9cf7; text-transform: uppercase; }
+.result-card .value { color: #e0e0e0; margin-top: 2px; word-break: break-word; }
+
+.cypher-display {
+    background: #0d0d20; border: 1px solid #2a2a4a; border-radius: 6px;
+    padding: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: #7fdbca; margin: 8px 0; white-space: pre-wrap; word-break: break-all;
+}
+
+/* Detail panel */
+.prop-row {
+    display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px;
+}
+.prop-key {
+    font-size: 11px; color: #8b9cf7; min-width: 100px;
+    padding-top: 6px; text-align: right;
+}
+.prop-val { flex: 1; }
+.prop-val input { font-size: 12px; }
+
+.neighbor-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px 0;
+    border-bottom: 1px solid #1a1a2e; cursor: pointer; font-size: 12px;
+}
+.neighbor-item:hover { background: rgba(139, 156, 247, 0.1); }
+.neighbor-badge {
+    font-size: 10px; padding: 2px 6px; border-radius: 8px;
+    background: #2a2a4a;
+}
+
+/* Legend */
+.legend {
+    position: fixed; bottom: 16px; left: 16px; background: rgba(15, 15, 35, 0.9);
+    border: 1px solid #2a2a4a; border-radius: 8px; padding: 10px 14px;
+    z-index: 80; font-size: 11px;
+}
+.legend-item { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+/* Context menu */
+.context-menu {
+    display: none; position: fixed; background: #1a1a2e; border: 1px solid #3a3a5a;
+    border-radius: 8px; padding: 4px; z-index: 200; min-width: 180px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.context-menu-item {
+    padding: 8px 12px; cursor: pointer; font-size: 12px; border-radius: 4px;
+}
+.context-menu-item:hover { background: #2a2a4a; }
+.context-menu-item.danger { color: #e74c5a; }
+
+/* Modal */
+.modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    z-index: 300; align-items: center; justify-content: center;
+}
+.modal-overlay.active { display: flex; }
+.modal {
+    background: #1a1a2e; border: 1px solid #3a3a5a; border-radius: 12px;
+    padding: 24px; width: 460px; max-height: 80vh; overflow-y: auto;
+}
+.modal h3 { font-size: 16px; margin-bottom: 16px; color: #8b9cf7; }
+.modal .form-group { margin-bottom: 12px; }
+.modal .form-group label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
+
+/* Loading */
+.spinner {
+    display: inline-block; width: 14px; height: 14px; border: 2px solid #3a3a5a;
+    border-top-color: #8b9cf7; border-radius: 50%; animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.toast {
+    position: fixed; bottom: 20px; right: 20px; background: #2a2a4a;
+    padding: 10px 16px; border-radius: 8px; font-size: 13px; z-index: 400;
+    border-left: 3px solid #8b9cf7; display: none;
+}
+.toast.error { border-left-color: #e74c5a; }
+.toast.active { display: block; }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="top-bar">
+    <h1>Biomedical Knowledge Graph Explorer</h1>
+    <div class="stats" id="stats-bar">Loading...</div>
+</div>
+
+<!-- Left panel -->
+<div class="panel panel-left" id="left-panel">
+    <div class="tabs">
+        <div class="tab active" data-tab="filters">Filters</div>
+        <div class="tab" data-tab="query">NL Query</div>
+        <div class="tab" data-tab="search">Semantic</div>
+        <div class="tab" data-tab="create">Create</div>
+    </div>
+
+    <!-- Filters tab -->
+    <div class="tab-content active" id="tab-filters">
+        <div class="panel-body">
+            <div class="filter-group">
+                <label>Node Types</label>
+                <div class="checkbox-grid" id="label-filters"></div>
+            </div>
+            <div class="filter-group">
+                <label>Relationship Types</label>
+                <div class="checkbox-grid" id="rel-filters"></div>
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-primary btn-sm" onclick="applyFilters()">Apply</button>
+                <button class="btn btn-secondary btn-sm" onclick="resetFilters()">Reset</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- NL Query tab -->
+    <div class="tab-content" id="tab-query">
+        <div class="panel-body">
+            <div class="query-box">
+                <input type="text" id="nl-input" placeholder="Ask about the graph..."
+                    onkeydown="if(event.key==='Enter')runNLQuery()">
+                <button class="btn btn-primary btn-sm" onclick="runNLQuery()">Ask</button>
+            </div>
+            <div id="nl-results" style="margin-top:12px"></div>
+            <div style="margin-top: 12px; font-size: 11px; color: #666;">
+                <b>Examples:</b><br>
+                • Which researchers have the highest h-index?<br>
+                • What drugs target EGFR?<br>
+                • Find papers about Alzheimer's from 2024<br>
+                • Show clinical trials for lung cancer<br>
+                • Which genes are associated with glioblastoma?<br>
+                • What is the total NIH funding?
+            </div>
+        </div>
+    </div>
+
+    <!-- Semantic Search tab -->
+    <div class="tab-content" id="tab-search">
+        <div class="panel-body">
+            <div class="form-group" style="margin-bottom:8px">
+                <label style="font-size:11px;color:#888;margin-bottom:4px;display:block">Search Type</label>
+                <select id="search-type">
+                    <option value="Paper:abstract_embedding">Papers (by abstract)</option>
+                    <option value="Researcher:bio_embedding">Researchers (by bio)</option>
+                    <option value="Disease:description_embedding">Diseases (by description)</option>
+                </select>
+            </div>
+            <div class="query-box">
+                <input type="text" id="sem-input" placeholder="Describe what you're looking for..."
+                    onkeydown="if(event.key==='Enter')runSemanticSearch()">
+                <button class="btn btn-primary btn-sm" onclick="runSemanticSearch()">Go</button>
+            </div>
+            <div id="sem-results" style="margin-top:12px"></div>
+        </div>
+    </div>
+
+    <!-- Create tab -->
+    <div class="tab-content" id="tab-create">
+        <div class="panel-body">
+            <div class="form-group" style="margin-bottom:8px">
+                <label style="font-size:11px;color:#888;margin-bottom:4px;display:block">Node Type</label>
+                <select id="create-label"></select>
+            </div>
+            <div id="create-fields"></div>
+            <button class="btn btn-primary btn-sm" onclick="createNode()" style="margin-top:8px">Create Node</button>
+        </div>
+    </div>
+</div>
+
+<!-- Right panel (detail) -->
+<div class="panel panel-right" id="right-panel">
+    <div class="panel-header">
+        <span id="detail-title">Node Detail</span>
+        <span class="panel-close" onclick="closeDetail()">&times;</span>
+    </div>
+    <div class="panel-body" id="detail-body"></div>
+</div>
+
+<!-- Legend -->
+<div class="legend" id="legend"></div>
+
+<!-- Context menu -->
+<div class="context-menu" id="context-menu">
+    <div class="context-menu-item" onclick="createRelFromContext()">Create Relationship →</div>
+    <div class="context-menu-item" onclick="editFromContext()">Edit Properties</div>
+    <div class="context-menu-item danger" onclick="deleteFromContext()">Delete Node</div>
+</div>
+
+<!-- Create Relationship Modal -->
+<div class="modal-overlay" id="rel-modal">
+    <div class="modal">
+        <h3>Create Relationship</h3>
+        <div class="form-group">
+            <label>From</label>
+            <input type="text" id="rel-from" readonly>
+        </div>
+        <div class="form-group">
+            <label>To (click a node in the graph)</label>
+            <input type="text" id="rel-to" readonly placeholder="Click target node...">
+        </div>
+        <div class="form-group">
+            <label>Relationship Type</label>
+            <select id="rel-type-select"></select>
+        </div>
+        <div id="rel-prop-fields"></div>
+        <div class="btn-group">
+            <button class="btn btn-primary" onclick="submitRelationship()">Create</button>
+            <button class="btn btn-secondary" onclick="closeRelModal()">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<div id="graph-container"></div>
+
+<script>
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+const COLORS = {
+    Researcher: '#4fc3f7',
+    Institution: '#ab47bc',
+    Paper: '#66bb6a',
+    Disease: '#ef5350',
+    Drug: '#ffa726',
+    Gene: '#26c6da',
+    ClinicalTrial: '#ec407a',
+    FundingAgency: '#ffee58',
+};
+
+const REL_COLORS = {
+    AUTHORED_BY: '#4fc3f7',
+    AFFILIATED_WITH: '#ab47bc',
+    CITES: '#66bb6a',
+    STUDIES: '#ef5350',
+    TREATS_WITH: '#ffa726',
+    TARGETS: '#26c6da',
+    ASSOCIATED_WITH: '#ff7043',
+    TESTS: '#ec407a',
+    TRIAL_FOR: '#ef5350',
+    FUNDED_BY: '#ffee58',
+    COLLABORATES_WITH: '#4fc3f7',
+};
+
+const NODE_SIZES = {
+    Paper: 5,
+    Disease: 7,
+    Drug: 6,
+    Gene: 4,
+    Researcher: 5,
+    Institution: 8,
+    ClinicalTrial: 5,
+    FundingAgency: 6,
+};
+
+let graphData = { nodes: [], links: [] };
+let graph;
+let schema = { labels: [], relationships: [] };
+let selectedNode = null;
+let contextNode = null;
+let relMode = false;
+let relSourceId = null;
+let activeLabels = new Set();
+let activeRels = new Set();
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+async function init() {
+    // Fetch schema and stats in parallel
+    const [schemaResp, statsResp] = await Promise.all([
+        fetch('/api/schema').then(r => r.json()),
+        fetch('/api/stats').then(r => r.json()),
+    ]);
+    schema = schemaResp;
+    updateStats(statsResp);
+    buildFilterUI();
+    buildCreateUI();
+    buildLegend();
+
+    // Init graph
+    graph = ForceGraph3D()(document.getElementById('graph-container'))
+        .backgroundColor('#0a0a1a')
+        .nodeLabel(n => {
+            const label = n.labels[0];
+            const name = n.props.name || n.props.title || n.props.symbol || n.props.trial_id || '';
+            return `<div style="background:rgba(15,15,35,0.9);padding:6px 10px;border-radius:6px;border:1px solid ${COLORS[label]||'#666'};font-size:12px;">
+                <b style="color:${COLORS[label]||'#fff'}">${label}</b><br>${name}</div>`;
+        })
+        .nodeColor(n => COLORS[n.labels[0]] || '#888')
+        .nodeVal(n => NODE_SIZES[n.labels[0]] || 4)
+        .nodeOpacity(0.9)
+        .linkColor(l => REL_COLORS[l.type] || '#555')
+        .linkWidth(1.5)
+        .linkOpacity(0.6)
+        .linkDirectionalArrowLength(4)
+        .linkDirectionalArrowRelPos(1)
+        .linkLabel(l => `<div style="background:rgba(15,15,35,0.9);padding:4px 8px;border-radius:4px;font-size:11px;">${l.type}</div>`)
+        .onNodeClick(node => showDetail(node))
+        .onNodeRightClick((node, event) => showContextMenu(node, event))
+        .onBackgroundClick(() => { closeDetail(); hideContextMenu(); })
+        .width(window.innerWidth)
+        .height(window.innerHeight);
+
+    // Load graph
+    await loadGraph();
+}
+
+async function loadGraph() {
+    const resp = await fetch('/api/graph?limit=500');
+    const data = await resp.json();
+    processGraphData(data);
+}
+
+function processGraphData(data) {
+    const nodeMap = new Map();
+    const nodes = data.nodes.map(n => {
+        const obj = { id: n.id, labels: n.labels, props: n.props };
+        nodeMap.set(n.id, obj);
+        return obj;
+    });
+    const links = data.relationships
+        .filter(r => nodeMap.has(r.source) && nodeMap.has(r.target))
+        .map(r => ({
+            id: r.id, type: r.type, source: r.source, target: r.target, props: r.props,
+        }));
+    graphData = { nodes, links };
+    graph.graphData(graphData);
+}
+
+// ---------------------------------------------------------------------------
+// Stats
+// ---------------------------------------------------------------------------
+function updateStats(stats) {
+    document.getElementById('stats-bar').textContent =
+        `${stats.total_nodes} nodes · ${stats.total_relationships} relationships · ${stats.node_counts.length} types`;
+}
+
+// ---------------------------------------------------------------------------
+// Filters
+// ---------------------------------------------------------------------------
+function buildFilterUI() {
+    const labelContainer = document.getElementById('label-filters');
+    const relContainer = document.getElementById('rel-filters');
+
+    const labels = schema.labels.map(l => l.label);
+    const rels = schema.relationships.map(r => r.rtype);
+
+    labels.forEach(l => {
+        activeLabels.add(l);
+        const chip = document.createElement('span');
+        chip.className = 'chip active';
+        chip.textContent = l;
+        chip.style.color = COLORS[l] || '#e0e0e0';
+        chip.onclick = () => {
+            chip.classList.toggle('active');
+            if (activeLabels.has(l)) activeLabels.delete(l); else activeLabels.add(l);
+        };
+        labelContainer.appendChild(chip);
+    });
+
+    rels.forEach(r => {
+        activeRels.add(r);
+        const chip = document.createElement('span');
+        chip.className = 'chip active';
+        chip.textContent = r;
+        chip.onclick = () => {
+            chip.classList.toggle('active');
+            if (activeRels.has(r)) activeRels.delete(r); else activeRels.add(r);
+        };
+        relContainer.appendChild(chip);
+    });
+}
+
+async function applyFilters() {
+    const labels = [...activeLabels].join(',');
+    const rels = [...activeRels].join(',');
+    const resp = await fetch(`/api/graph/filtered?labels=${labels}&rel_types=${rels}`);
+    const data = await resp.json();
+    processGraphData(data);
+    showToast(`Showing ${data.nodes.length} nodes`);
+}
+
+function resetFilters() {
+    document.querySelectorAll('#label-filters .chip, #rel-filters .chip').forEach(c => {
+        c.classList.add('active');
+    });
+    activeLabels = new Set(schema.labels.map(l => l.label));
+    activeRels = new Set(schema.relationships.map(r => r.rtype));
+    loadGraph();
+}
+
+// ---------------------------------------------------------------------------
+// Tabs
+// ---------------------------------------------------------------------------
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// NL Query
+// ---------------------------------------------------------------------------
+async function runNLQuery() {
+    const input = document.getElementById('nl-input');
+    const question = input.value.trim();
+    if (!question) return;
+
+    const container = document.getElementById('nl-results');
+    container.innerHTML = '<div class="spinner"></div> Thinking...';
+
+    try {
+        const resp = await fetch('/api/nl-query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question }),
+        });
+        const data = await resp.json();
+
+        let html = `<div class="cypher-display">${escapeHtml(data.cypher)}</div>`;
+        if (data.error) {
+            html += `<div class="result-card"><div class="label" style="color:#e74c5a">Error</div><div class="value">${escapeHtml(data.error)}</div></div>`;
+        } else {
+            html += `<div style="font-size:11px;color:#888;margin-bottom:6px">${data.count} result(s)</div>`;
+            data.records.slice(0, 20).forEach(rec => {
+                html += '<div class="result-card">';
+                for (const [k, v] of Object.entries(rec)) {
+                    const display = typeof v === 'object' ? JSON.stringify(v, null, 1) : String(v);
+                    html += `<div class="label">${k}</div><div class="value">${escapeHtml(display)}</div>`;
+                }
+                html += '</div>';
+            });
+        }
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="result-card"><div class="label" style="color:#e74c5a">Error</div><div class="value">${e.message}</div></div>`;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Semantic Search
+// ---------------------------------------------------------------------------
+async function runSemanticSearch() {
+    const query = document.getElementById('sem-input').value.trim();
+    if (!query) return;
+
+    const [label, prop] = document.getElementById('search-type').value.split(':');
+    const container = document.getElementById('sem-results');
+    container.innerHTML = '<div class="spinner"></div> Embedding & searching...';
+
+    try {
+        const resp = await fetch('/api/semantic-search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, label, property: prop, top_k: 5 }),
+        });
+        const data = await resp.json();
+
+        if (data.error) {
+            container.innerHTML = `<div class="result-card"><div class="label" style="color:#e74c5a">Error</div><div class="value">${escapeHtml(data.error)}</div>${data.hint ? `<div class="value" style="color:#888;margin-top:4px">${data.hint}</div>` : ''}</div>`;
+            return;
+        }
+
+        let html = '';
+        data.results.forEach((r, i) => {
+            const score = (r.score * 100).toFixed(1);
+            html += `<div class="result-card">
+                <div class="label">Score: ${score}%</div>`;
+            for (const [k, v] of Object.entries(r.node)) {
+                if (typeof v === 'string' && v.length > 200) continue;
+                html += `<div class="value"><b>${k}:</b> ${escapeHtml(String(v))}</div>`;
+            }
+            html += '</div>';
+        });
+        container.innerHTML = html || '<div style="font-size:12px;color:#888">No results</div>';
+    } catch (e) {
+        container.innerHTML = `<div class="result-card"><div class="label" style="color:#e74c5a">Error</div><div class="value">${e.message}</div></div>`;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Node detail panel
+// ---------------------------------------------------------------------------
+async function showDetail(node) {
+    if (relMode) {
+        document.getElementById('rel-to').value = `${node.labels[0]}: ${node.props.name || node.props.title || node.id}`;
+        document.getElementById('rel-to').dataset.id = node.id;
+        return;
+    }
+
+    selectedNode = node;
+    const panel = document.getElementById('right-panel');
+    const title = document.getElementById('detail-title');
+    const body = document.getElementById('detail-body');
+
+    const label = node.labels[0];
+    title.innerHTML = `<span style="color:${COLORS[label]||'#fff'}">${label}</span>: ${node.props.name || node.props.title || node.props.symbol || ''}`;
+
+    // Editable properties
+    let html = '<div style="margin-bottom:12px">';
+    for (const [k, v] of Object.entries(node.props)) {
+        if (k.includes('embedding')) continue;
+        const displayVal = typeof v === 'object' ? JSON.stringify(v) : String(v);
+        html += `<div class="prop-row">
+            <div class="prop-key">${k}</div>
+            <div class="prop-val"><input type="text" data-prop="${k}" value="${escapeAttr(displayVal)}"></div>
+        </div>`;
+    }
+    html += '</div>';
+    html += `<div class="btn-group" style="margin-bottom:16px">
+        <button class="btn btn-primary btn-sm" onclick="saveNodeEdits()">Save Changes</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteSelectedNode()">Delete</button>
+    </div>`;
+
+    // Neighbors
+    html += '<div class="panel-header" style="padding:8px 0;border-top:1px solid #2a2a4a">Connections</div>';
+    html += '<div id="neighbors-list"><div class="spinner"></div></div>';
+
+    body.innerHTML = html;
+    panel.style.display = 'block';
+
+    // Fetch neighbors
+    const resp = await fetch(`/api/nodes/${encodeURIComponent(node.id)}/neighbors`);
+    const neighbors = await resp.json();
+    let nhtml = '';
+
+    neighbors.outgoing.forEach(n => {
+        const nlabel = n.labels[0];
+        nhtml += `<div class="neighbor-item" onclick="focusNode('${n.id}')">
+            <span class="neighbor-badge" style="color:${COLORS[nlabel]||'#888'}">${nlabel}</span>
+            <span>→ ${n.props.name || n.props.title || n.props.symbol || ''}</span>
+            <span style="margin-left:auto;font-size:10px;color:#666">${n.rel_type}</span>
+        </div>`;
+    });
+    neighbors.incoming.forEach(n => {
+        const nlabel = n.labels[0];
+        nhtml += `<div class="neighbor-item" onclick="focusNode('${n.id}')">
+            <span style="font-size:10px;color:#666">${n.rel_type}</span>
+            <span>← ${n.props.name || n.props.title || n.props.symbol || ''}</span>
+            <span class="neighbor-badge" style="margin-left:auto;color:${COLORS[nlabel]||'#888'}">${nlabel}</span>
+        </div>`;
+    });
+
+    document.getElementById('neighbors-list').innerHTML = nhtml || '<div style="font-size:12px;color:#666;padding:8px 0">No connections</div>';
+}
+
+function closeDetail() {
+    document.getElementById('right-panel').style.display = 'none';
+    selectedNode = null;
+}
+
+function focusNode(nodeId) {
+    const node = graphData.nodes.find(n => n.id === nodeId);
+    if (node) {
+        graph.centerAt(node.x, node.y, 1000);
+        graph.cameraPosition({ x: node.x, y: node.y, z: node.z + 100 }, node, 1000);
+        showDetail(node);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CRUD operations
+// ---------------------------------------------------------------------------
+async function saveNodeEdits() {
+    if (!selectedNode) return;
+    const inputs = document.querySelectorAll('#detail-body input[data-prop]');
+    const properties = {};
+    inputs.forEach(inp => {
+        let val = inp.value;
+        if (val === 'true') val = true;
+        else if (val === 'false') val = false;
+        else if (!isNaN(val) && val !== '') val = Number(val);
+        properties[inp.dataset.prop] = val;
+    });
+
+    try {
+        const resp = await fetch('/api/nodes', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                label: selectedNode.labels[0],
+                element_id: selectedNode.id,
+                properties,
+            }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const updated = await resp.json();
+        // Update local graph data
+        selectedNode.props = updated.props;
+        showToast('Node updated');
+    } catch (e) {
+        showToast('Update failed: ' + e.message, true);
+    }
+}
+
+async function deleteSelectedNode() {
+    if (!selectedNode) return;
+    if (!confirm(`Delete ${selectedNode.labels[0]}: ${selectedNode.props.name || selectedNode.props.title}?`)) return;
+
+    try {
+        await fetch(`/api/nodes/${encodeURIComponent(selectedNode.id)}`, { method: 'DELETE' });
+        // Remove from graph
+        graphData.nodes = graphData.nodes.filter(n => n.id !== selectedNode.id);
+        graphData.links = graphData.links.filter(l =>
+            (typeof l.source === 'object' ? l.source.id : l.source) !== selectedNode.id &&
+            (typeof l.target === 'object' ? l.target.id : l.target) !== selectedNode.id
+        );
+        graph.graphData(graphData);
+        closeDetail();
+        showToast('Node deleted');
+    } catch (e) {
+        showToast('Delete failed: ' + e.message, true);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Create node
+// ---------------------------------------------------------------------------
+function buildCreateUI() {
+    const select = document.getElementById('create-label');
+    schema.labels.forEach(l => {
+        const opt = document.createElement('option');
+        opt.value = l.label;
+        opt.textContent = l.label;
+        select.appendChild(opt);
+    });
+    select.onchange = () => updateCreateFields();
+    updateCreateFields();
+}
+
+function updateCreateFields() {
+    const label = document.getElementById('create-label').value;
+    const container = document.getElementById('create-fields');
+    const schemaLabel = schema.labels.find(l => l.label === label);
+    if (!schemaLabel) return;
+
+    let html = '';
+    schemaLabel.props.filter(p => !p.includes('embedding')).forEach(prop => {
+        html += `<div class="form-group" style="margin-bottom:6px">
+            <label style="font-size:11px;color:#888">${prop}</label>
+            <input type="text" data-create-prop="${prop}" placeholder="${prop}">
+        </div>`;
+    });
+    container.innerHTML = html;
+}
+
+async function createNode() {
+    const label = document.getElementById('create-label').value;
+    const inputs = document.querySelectorAll('input[data-create-prop]');
+    const properties = {};
+    inputs.forEach(inp => {
+        if (inp.value.trim()) {
+            let val = inp.value.trim();
+            if (!isNaN(val)) val = Number(val);
+            properties[inp.dataset.createProp] = val;
+        }
+    });
+
+    if (Object.keys(properties).length === 0) {
+        showToast('Fill in at least one property', true);
+        return;
+    }
+
+    try {
+        const resp = await fetch('/api/nodes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ label, properties }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const node = await resp.json();
+        // Add to graph
+        graphData.nodes.push({ id: node.id, labels: node.labels, props: node.props });
+        graph.graphData(graphData);
+        showToast(`Created ${label} node`);
+        // Clear inputs
+        inputs.forEach(inp => inp.value = '');
+    } catch (e) {
+        showToast('Create failed: ' + e.message, true);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Context menu + relationship creation
+// ---------------------------------------------------------------------------
+function showContextMenu(node, event) {
+    event.preventDefault();
+    contextNode = node;
+    const menu = document.getElementById('context-menu');
+    menu.style.display = 'block';
+    menu.style.left = event.clientX + 'px';
+    menu.style.top = event.clientY + 'px';
+}
+
+function hideContextMenu() {
+    document.getElementById('context-menu').style.display = 'none';
+}
+
+function createRelFromContext() {
+    hideContextMenu();
+    relMode = true;
+    relSourceId = contextNode.id;
+    document.getElementById('rel-from').value =
+        `${contextNode.labels[0]}: ${contextNode.props.name || contextNode.props.title || contextNode.id}`;
+    document.getElementById('rel-to').value = '';
+    document.getElementById('rel-to').dataset.id = '';
+
+    // Populate rel types
+    const select = document.getElementById('rel-type-select');
+    select.innerHTML = '';
+    schema.relationships.forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r.rtype;
+        opt.textContent = `${r.rtype} (${r.src} → ${r.tgt})`;
+        select.appendChild(opt);
+    });
+
+    document.getElementById('rel-modal').classList.add('active');
+}
+
+function editFromContext() {
+    hideContextMenu();
+    showDetail(contextNode);
+}
+
+function deleteFromContext() {
+    hideContextMenu();
+    selectedNode = contextNode;
+    deleteSelectedNode();
+}
+
+async function submitRelationship() {
+    const targetId = document.getElementById('rel-to').dataset.id;
+    if (!targetId) {
+        showToast('Click a target node first', true);
+        return;
+    }
+
+    const relType = document.getElementById('rel-type-select').value;
+
+    try {
+        const resp = await fetch('/api/relationships', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                source_id: relSourceId,
+                target_id: targetId,
+                rel_type: relType,
+                properties: {},
+            }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const rel = await resp.json();
+        graphData.links.push({
+            id: rel.id, type: rel.type,
+            source: relSourceId, target: targetId,
+            props: rel.props,
+        });
+        graph.graphData(graphData);
+        closeRelModal();
+        showToast(`Created ${relType} relationship`);
+    } catch (e) {
+        showToast('Create failed: ' + e.message, true);
+    }
+}
+
+function closeRelModal() {
+    relMode = false;
+    relSourceId = null;
+    document.getElementById('rel-modal').classList.remove('active');
+}
+
+// ---------------------------------------------------------------------------
+// Legend
+// ---------------------------------------------------------------------------
+function buildLegend() {
+    const container = document.getElementById('legend');
+    let html = '';
+    for (const [label, color] of Object.entries(COLORS)) {
+        html += `<div class="legend-item">
+            <div class="legend-dot" style="background:${color}"></div>
+            <span>${label}</span>
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function escapeAttr(str) {
+    return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function showToast(msg, isError = false) {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.className = `toast active${isError ? ' error' : ''}`;
+    setTimeout(() => toast.classList.remove('active'), 3000);
+}
+
+// Close context menu on click elsewhere
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.context-menu')) hideContextMenu();
+});
+
+// Resize
+window.addEventListener('resize', () => {
+    graph.width(window.innerWidth).height(window.innerHeight);
+});
+
+// Boot
+init();
+</script>
+</body>
+</html>
