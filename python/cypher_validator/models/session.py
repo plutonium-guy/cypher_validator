@@ -210,10 +210,108 @@ class Traversal:
         )
         return cypher, params
 
+    @staticmethod
+    def shortest_path_by_id(
+        src_id: str,
+        tgt_id: str,
+        max_depth: int = 5,
+        rel_type: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """Find shortest path between two nodes by element ID."""
+        params = {"src_id": src_id, "tgt_id": tgt_id}
+        rel_spec = f":{rel_type}" if rel_type else ""
+        cypher = (
+            f"MATCH (src), (tgt), "
+            f"path = shortestPath((src)-[{rel_spec}*..{max_depth}]-(tgt)) "
+            f"WHERE elementId(src) = $src_id AND elementId(tgt) = $tgt_id "
+            f"RETURN path, length(path) AS distance"
+        )
+        return cypher, params
+
+    @staticmethod
+    def common_neighbors_by_id(
+        src_id: str,
+        tgt_id: str,
+        rel_type: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """Find common neighbors of two nodes by element ID."""
+        params = {"src_id": src_id, "tgt_id": tgt_id}
+        rtype = f":{rel_type}" if rel_type else ""
+        cypher = (
+            f"MATCH (a)-[{rtype}]-(common)-[{rtype}]-(b) "
+            f"WHERE elementId(a) = $src_id AND elementId(b) = $tgt_id "
+            f"AND a <> b AND common <> a AND common <> b "
+            f"RETURN DISTINCT common"
+        )
+        return cypher, params
+
+    @staticmethod
+    def neighbors_by_id(
+        element_id: str,
+        rel_type: str | None = None,
+        direction: str = "both",
+        limit: int | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """Find neighbors of a node by element ID."""
+        _validate_direction(direction)
+        params = {"eid": element_id}
+        rtype = f":{rel_type}" if rel_type else ""
+        if direction == "out":
+            rel_pat = f"-[r{rtype}]->"
+        elif direction == "in":
+            rel_pat = f"<-[r{rtype}]-"
+        else:
+            rel_pat = f"-[r{rtype}]-"
+        cypher = (
+            f"MATCH (n){rel_pat}(neighbor) "
+            f"WHERE elementId(n) = $eid "
+            f"RETURN n, r, neighbor"
+        )
+        if limit:
+            cypher += f" LIMIT {limit}"
+        return cypher, params
+
+    @staticmethod
+    def subgraph_by_id(
+        element_id: str,
+        depth: int = 2,
+    ) -> tuple[str, dict[str, Any]]:
+        """Extract a subgraph around a node by element ID."""
+        params = {"eid": element_id}
+        cypher = (
+            f"MATCH path = (n)-[*1..{depth}]-(connected) "
+            f"WHERE elementId(n) = $eid "
+            f"RETURN path"
+        )
+        return cypher, params
+
 
 # ---------------------------------------------------------------------------
 # Bulk Operations
 # ---------------------------------------------------------------------------
+
+
+_MATCH_OPS = {"eq", "starts_with", "contains"}
+
+
+def _validate_match_op(op: str, param_name: str) -> None:
+    if op not in _MATCH_OPS:
+        raise ValueError(
+            f"Invalid match operator '{op}' for {param_name}. "
+            f"Must be one of: {', '.join(sorted(_MATCH_OPS))}"
+        )
+
+
+def _build_match_pattern(
+    op: str, var: str, label: str, prop: str, item_key: str,
+) -> tuple[str, str]:
+    """Return (pattern, where_fragment) for a match operator."""
+    if op == "eq":
+        return f"({var}:{label} {{{prop}: item.{item_key}}})", ""
+    elif op == "starts_with":
+        return f"({var}:{label})", f"{var}.{prop} STARTS WITH item.{item_key}"
+    else:  # contains
+        return f"({var}:{label})", f"{var}.{prop} CONTAINS item.{item_key}"
 
 
 class BulkOps:
@@ -273,11 +371,16 @@ class BulkOps:
         items: list[dict[str, Any]],
         src_key: str,
         tgt_key: str,
+        src_match: str = "eq",
+        tgt_match: str = "eq",
     ) -> tuple[str, dict[str, Any]]:
         """UNWIND-based bulk CREATE for relationships.
 
         Each item dict should contain *src_key* and *tgt_key* to match
         source/target nodes, plus any relationship properties.
+
+        *src_match* and *tgt_match* control the match operator:
+        ``"eq"`` (default), ``"starts_with"``, or ``"contains"``.
 
         Example::
 
@@ -287,21 +390,25 @@ class BulkOps:
                 src_key="src_name", tgt_key="tgt_title",
             )
         """
+        _validate_match_op(src_match, "src_match")
+        _validate_match_op(tgt_match, "tgt_match")
         params = {"batch": items}
         src_label = rel_model.source_label()
         tgt_label = rel_model.target_label()
         rel_type = rel_model.rel_type()
-        # Determine the source/target property names from keys
         src_prop = src_key.replace("src_", "")
         tgt_prop = tgt_key.replace("tgt_", "")
         rel_props = rel_model.property_names()
         prop_str = ""
         if rel_props:
             prop_str = " {" + ", ".join(f"{k}: item.{k}" for k in rel_props) + "}"
+        src_pattern, src_where = _build_match_pattern(src_match, "a", src_label, src_prop, src_key)
+        tgt_pattern, tgt_where = _build_match_pattern(tgt_match, "b", tgt_label, tgt_prop, tgt_key)
+        where_parts = [w for w in [src_where, tgt_where] if w]
+        where_clause = f" WHERE {' AND '.join(where_parts)}" if where_parts else ""
         cypher = (
             f"UNWIND $batch AS item "
-            f"MATCH (a:{src_label} {{{src_prop}: item.{src_key}}}), "
-            f"(b:{tgt_label} {{{tgt_prop}: item.{tgt_key}}}) "
+            f"MATCH {src_pattern}, {tgt_pattern}{where_clause} "
             f"CREATE (a)-[r:{rel_type}{prop_str}]->(b) "
             f"RETURN r"
         )
@@ -313,8 +420,16 @@ class BulkOps:
         items: list[dict[str, Any]],
         src_key: str,
         tgt_key: str,
+        src_match: str = "eq",
+        tgt_match: str = "eq",
     ) -> tuple[str, dict[str, Any]]:
-        """UNWIND-based bulk MERGE for relationships."""
+        """UNWIND-based bulk MERGE for relationships.
+
+        *src_match* and *tgt_match* control the match operator:
+        ``"eq"`` (default), ``"starts_with"``, or ``"contains"``.
+        """
+        _validate_match_op(src_match, "src_match")
+        _validate_match_op(tgt_match, "tgt_match")
         params = {"batch": items}
         src_label = rel_model.source_label()
         tgt_label = rel_model.target_label()
@@ -322,10 +437,13 @@ class BulkOps:
         src_prop = src_key.replace("src_", "")
         tgt_prop = tgt_key.replace("tgt_", "")
         rel_props = rel_model.property_names()
+        src_pattern, src_where = _build_match_pattern(src_match, "a", src_label, src_prop, src_key)
+        tgt_pattern, tgt_where = _build_match_pattern(tgt_match, "b", tgt_label, tgt_prop, tgt_key)
+        where_parts = [w for w in [src_where, tgt_where] if w]
+        where_clause = f" WHERE {' AND '.join(where_parts)}" if where_parts else ""
         cypher = (
             f"UNWIND $batch AS item "
-            f"MATCH (a:{src_label} {{{src_prop}: item.{src_key}}}), "
-            f"(b:{tgt_label} {{{tgt_prop}: item.{tgt_key}}}) "
+            f"MATCH {src_pattern}, {tgt_pattern}{where_clause} "
             f"MERGE (a)-[r:{rel_type}]->(b)"
         )
         if rel_props:
@@ -449,6 +567,21 @@ class GraphSession:
     ) -> list[dict[str, Any]]:
         """Bulk merge nodes using UNWIND."""
         cypher, params = BulkOps.bulk_merge_nodes(model, items, merge_keys)
+        return self.execute(cypher, params)
+
+    def bulk_create_relationships(
+        self,
+        rel_model: Type[RelationshipModel],
+        items: list[dict[str, Any]],
+        src_key: str,
+        tgt_key: str,
+        src_match: str = "eq",
+        tgt_match: str = "eq",
+    ) -> list[dict[str, Any]]:
+        """Bulk create relationships using UNWIND."""
+        cypher, params = BulkOps.bulk_create_relationships(
+            rel_model, items, src_key, tgt_key, src_match, tgt_match
+        )
         return self.execute(cypher, params)
 
     def create_relationship(
@@ -833,6 +966,43 @@ class Repository:
         delete_kw = "DETACH DELETE" if detach else "DELETE"
         cypher = f"MATCH ({self.var}:{self.model.label()}) {delete_kw} {self.var}"
         return self._execute(cypher, {})
+
+    def find_by_id(self, element_id: str) -> Any | None:
+        """Find a node by Neo4j element ID."""
+        cypher = (
+            f"MATCH ({self.var}:{self.model.label()}) "
+            f"WHERE elementId({self.var}) = $eid "
+            f"RETURN {self.var}"
+        )
+        records = self._execute(cypher, {"eid": element_id})
+        results = self.model.from_records(records, self.var)
+        return results[0] if results else None
+
+    def update_by_id(self, element_id: str, set_props: dict[str, Any]) -> list[dict[str, Any]]:
+        """Update a node by element ID."""
+        params: dict[str, Any] = {"eid": element_id}
+        set_parts = []
+        for k, v in set_props.items():
+            pname = f"set_{k}"
+            params[pname] = v
+            set_parts.append(f"{self.var}.{k} = ${pname}")
+        cypher = (
+            f"MATCH ({self.var}:{self.model.label()}) "
+            f"WHERE elementId({self.var}) = $eid "
+            f"SET {', '.join(set_parts)} "
+            f"RETURN {self.var}"
+        )
+        return self._execute(cypher, params)
+
+    def delete_by_id(self, element_id: str, detach: bool = True) -> list[dict[str, Any]]:
+        """Delete a node by element ID."""
+        delete_kw = "DETACH DELETE" if detach else "DELETE"
+        cypher = (
+            f"MATCH ({self.var}:{self.model.label()}) "
+            f"WHERE elementId({self.var}) = $eid "
+            f"{delete_kw} {self.var}"
+        )
+        return self._execute(cypher, {"eid": element_id})
 
     def query(self) -> Query:
         """Start a Query builder pre-configured with MATCH for this model."""

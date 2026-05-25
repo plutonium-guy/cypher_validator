@@ -95,6 +95,7 @@ class NodeModel(BaseModel, metaclass=_NodeMeta):
     __constraints__: ClassVar[list[str]] = []
     __indexes__: ClassVar[list[str]] = []
     __vector_indexes__: ClassVar[dict[str, VectorProperty]] = {}
+    __index_exclude__: ClassVar[set[str]] = set()
 
     @classmethod
     def label(cls) -> str:

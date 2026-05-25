@@ -296,7 +296,21 @@ class Query:
             text = condition
         else:
             text = condition.render()
-        self._clauses.append(("WHERE", text))
+        # Auto-AND if WHERE already exists after the last MATCH/WITH/UNWIND
+        has_where = False
+        for clause_type, _ in reversed(self._clauses):
+            if clause_type == "WHERE":
+                has_where = True
+                break
+            if clause_type in (
+                "MATCH", "OPTIONAL MATCH", "WITH", "WITH DISTINCT",
+                "UNWIND", "RETURN", "RETURN DISTINCT", "CREATE", "MERGE",
+            ):
+                break
+        if has_where:
+            self._clauses.append(("AND", text))
+        else:
+            self._clauses.append(("WHERE", text))
         return self
 
     def and_where(self, condition: Cond | CondGroup | str) -> Query:
@@ -511,10 +525,39 @@ class Query:
 
     # -- Build --
 
+    def _reorder_clauses(
+        self, clauses: list[tuple[str, str]]
+    ) -> list[tuple[str, str]]:
+        """Move WHERE/AND/OR clauses that appear after RETURN to before RETURN."""
+        return_idx: int | None = None
+        for i, (ct, _) in enumerate(clauses):
+            if ct in ("RETURN", "RETURN DISTINCT"):
+                return_idx = i
+                break
+        if return_idx is None:
+            return clauses
+
+        before_return = clauses[:return_idx]
+        at_and_after_return = clauses[return_idx:]
+
+        displaced_wheres: list[tuple[str, str]] = []
+        remaining_after: list[tuple[str, str]] = []
+        for ct, text in at_and_after_return:
+            if ct in ("WHERE", "AND", "OR"):
+                displaced_wheres.append((ct, text))
+            else:
+                remaining_after.append((ct, text))
+
+        if not displaced_wheres:
+            return clauses
+
+        return before_return + displaced_wheres + remaining_after
+
     def build(self) -> tuple[str, dict[str, Any]]:
         """Render the query as (cypher_string, parameters_dict)."""
+        clauses = self._reorder_clauses(list(self._clauses))
         parts: list[str] = []
-        for clause_type, text in self._clauses:
+        for clause_type, text in clauses:
             if clause_type:
                 parts.append(f"{clause_type} {text}")
             else:

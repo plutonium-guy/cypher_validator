@@ -310,11 +310,36 @@ class SchemaDDL:
                 )
         return stmts
 
+    def _should_skip_btree_index(self, model: Type[NodeModel], prop: str) -> bool:
+        """Return True if a property should not get a B-tree index."""
+        if prop.endswith("_embedding"):
+            return True
+        exclude = getattr(model, "__index_exclude__", set())
+        if prop in exclude:
+            return True
+        field_info = model.model_fields.get(prop)
+        if field_info is not None:
+            annotation = field_info.annotation
+            if annotation is list or annotation is list[float]:
+                return True
+            origin = getattr(annotation, "__origin__", None)
+            if origin is list:
+                args = getattr(annotation, "__args__", ())
+                if not args or args == (float,):
+                    return True
+        return False
+
     def property_indexes(self) -> list[str]:
-        """Generate property indexes for all node properties."""
+        """Generate property indexes for all node properties.
+
+        Skips fields that end with '_embedding', have list[float] type
+        annotation, or are listed in the model's __index_exclude__ set.
+        """
         stmts: list[str] = []
         for m in self.schema.node_models:
             for prop in m.property_names():
+                if self._should_skip_btree_index(m, prop):
+                    continue
                 name = f"idx_{m.label().lower()}_{prop}"
                 stmts.append(
                     f"CREATE INDEX {name} IF NOT EXISTS "
