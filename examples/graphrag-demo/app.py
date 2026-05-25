@@ -219,6 +219,11 @@ class CommonNeighborsRequest(BaseModel):
     target_id: str
 
 
+class SubgraphRequest(BaseModel):
+    element_id: str
+    depth: int = 2
+
+
 class RAGRequest(BaseModel):
     question: str
 
@@ -258,26 +263,13 @@ async def index():
 async def get_full_graph(limit: int = QueryParam(default=500, le=2000)):
     """Return all nodes and relationships for 3D visualization."""
     session = get_session()
-    nodes = session.execute(
-        "MATCH (n) "
-        "RETURN elementId(n) AS id, labels(n) AS labels, properties(n) AS props "
-        "LIMIT $limit",
-        {"limit": limit},
-    )
-    rels = session.execute(
-        "MATCH (a)-[r]->(b) "
-        "RETURN elementId(r) AS id, type(r) AS type, "
-        "elementId(a) AS source, elementId(b) AS target, "
-        "properties(r) AS props "
-        "LIMIT $limit",
-        {"limit": limit * 3},
-    )
+    data = session.fetch_graph(node_limit=limit)
 
-    for n in nodes:
+    for n in data["nodes"]:
         if isinstance(n.get("props"), dict):
             n["props"] = strip_embeddings(n["props"])
 
-    return {"nodes": nodes, "relationships": rels}
+    return data
 
 
 @app.get("/api/graph/filtered")
@@ -368,12 +360,9 @@ async def get_stats():
     rcypher, rparams = q_rels.build()
     rel_counts = session.execute(rcypher, rparams)
 
-    total_nodes = session.execute("MATCH (n) RETURN count(n) AS total")
-    total_rels = session.execute("MATCH ()-[r]->() RETURN count(r) AS total")
-
     return {
-        "total_nodes": total_nodes[0]["total"],
-        "total_relationships": total_rels[0]["total"],
+        "total_nodes": session.count_nodes(),
+        "total_relationships": session.count_relationships(),
         "node_counts": node_counts,
         "rel_counts": rel_counts,
     }
@@ -397,21 +386,12 @@ async def create_node(req: NodeCreate):
         if result:
             return result[0]
 
-    # Fallback for unknown labels
+    # Fallback for unknown labels — use Query builder with dynamic label
     props = {k: v for k, v in req.properties.items() if v is not None}
-    set_parts = []
-    params = {}
-    for i, (k, v) in enumerate(props.items()):
-        pname = f"p{i}"
-        set_parts.append(f"n.{k} = ${pname}")
-        params[pname] = v
-
-    set_clause = ", ".join(set_parts) if set_parts else ""
-    cypher = f"CREATE (n:{req.label})"
-    if set_clause:
-        cypher += f" SET {set_clause}"
-    cypher += " RETURN elementId(n) AS id, labels(n) AS labels, properties(n) AS props"
-
+    q = Query().create(req.label, "n", props or None).return_(
+        "elementId(n) AS id", "labels(n) AS labels", "properties(n) AS props"
+    )
+    cypher, params = q.build()
     result = session.execute(cypher, params)
     if not result:
         raise HTTPException(500, "Failed to create node")
@@ -425,77 +405,41 @@ async def update_node(req: NodeUpdate):
     model_cls = MODEL_MAP.get(req.label)
     props = {k: v for k, v in req.properties.items() if "embedding" not in k.lower()}
 
-    if model_cls and props:
-        repo = Repository(model_cls, session)
-        # Find node by element ID, then update
-        result = session.execute(
-            "MATCH (n) WHERE elementId(n) = $eid "
-            "RETURN properties(n) AS p",
-            {"eid": req.element_id},
-        )
-        if result:
-            existing = result[0]["p"]
-            key_fields = [f for f in model_cls.model_fields if f != "id"]
-            match_props = {}
-            for k in key_fields[:1]:
-                if k in existing:
-                    match_props[k] = existing[k]
-            if match_props:
-                repo.update(match_props, props)
-
-    # Always return updated node
-    set_parts = []
-    params = {"eid": req.element_id}
-    for i, (k, v) in enumerate(props.items()):
-        pname = f"p{i}"
-        set_parts.append(f"n.{k} = ${pname}")
-        params[pname] = v
-
-    if not set_parts:
+    if not props:
         raise HTTPException(400, "No properties to update")
 
-    set_clause = ", ".join(set_parts)
-    result = session.execute(
-        f"MATCH (n) WHERE elementId(n) = $eid "
-        f"SET {set_clause} "
-        "RETURN elementId(n) AS id, labels(n) AS labels, properties(n) AS props",
-        params,
-    )
-    if not result:
-        raise HTTPException(404, "Node not found")
-    return result[0]
+    if model_cls:
+        repo = Repository(model_cls, session)
+        repo.update_by_id(req.element_id, props)
+        found = repo.find_by_id(req.element_id)
+        if found:
+            return {"id": req.element_id, "labels": [req.label], "props": found}
+
+    raise HTTPException(404, "Node not found")
 
 
 @app.delete("/api/nodes/{element_id}")
 async def delete_node(element_id: str):
-    """Delete a node and its relationships."""
+    """Delete a node and its relationships using Repository."""
     session = get_session()
-    session.execute(
-        "MATCH (n) WHERE elementId(n) = $eid DETACH DELETE n RETURN count(*) AS deleted",
-        {"eid": element_id},
-    )
-    return {"deleted": True}
+    # Try each model's repo to find and delete by element ID
+    for model_cls in MODEL_MAP.values():
+        repo = Repository(model_cls, session)
+        if repo.find_by_id(element_id):
+            repo.delete_by_id(element_id)
+            return {"deleted": True}
+    raise HTTPException(404, "Node not found")
 
 
 @app.post("/api/relationships")
 async def create_relationship(req: RelationshipCreate):
-    """Create a relationship between two nodes using Query builder."""
+    """Create a relationship using GraphSession.create_relationship_by_id()."""
     session = get_session()
-    params = {"src": req.source_id, "tgt": req.target_id}
-    prop_parts = []
-    for i, (k, v) in enumerate(req.properties.items()):
-        pname = f"rp{i}"
-        prop_parts.append(f"{k}: ${pname}")
-        params[pname] = v
-
-    prop_clause = f" {{{', '.join(prop_parts)}}}" if prop_parts else ""
-    result = session.execute(
-        f"MATCH (a) WHERE elementId(a) = $src "
-        f"MATCH (b) WHERE elementId(b) = $tgt "
-        f"CREATE (a)-[r:{req.rel_type}{prop_clause}]->(b) "
-        "RETURN elementId(r) AS id, type(r) AS type, "
-        "elementId(a) AS source, elementId(b) AS target, properties(r) AS props",
-        params,
+    result = session.create_relationship_by_id(
+        src_id=req.source_id,
+        tgt_id=req.target_id,
+        rel_type=req.rel_type,
+        props=req.properties or None,
     )
     if not result:
         raise HTTPException(500, "Failed to create relationship")
@@ -504,25 +448,11 @@ async def create_relationship(req: RelationshipCreate):
 
 @app.put("/api/relationships")
 async def update_relationship(req: RelationshipUpdate):
-    """Update relationship properties."""
+    """Update relationship properties using GraphSession.update_relationship_by_id()."""
     session = get_session()
-    set_parts = []
-    params = {"eid": req.element_id}
-    for i, (k, v) in enumerate(req.properties.items()):
-        pname = f"rp{i}"
-        set_parts.append(f"r.{k} = ${pname}")
-        params[pname] = v
-
-    if not set_parts:
+    if not req.properties:
         raise HTTPException(400, "No properties to update")
-
-    set_clause = ", ".join(set_parts)
-    result = session.execute(
-        f"MATCH ()-[r]->() WHERE elementId(r) = $eid "
-        f"SET {set_clause} "
-        "RETURN elementId(r) AS id, type(r) AS type, properties(r) AS props",
-        params,
-    )
+    result = session.update_relationship_by_id(req.element_id, req.properties)
     if not result:
         raise HTTPException(404, "Relationship not found")
     return result[0]
@@ -530,12 +460,9 @@ async def update_relationship(req: RelationshipUpdate):
 
 @app.delete("/api/relationships/{element_id}")
 async def delete_relationship(element_id: str):
-    """Delete a relationship."""
+    """Delete a relationship using GraphSession.delete_relationship_by_id()."""
     session = get_session()
-    session.execute(
-        "MATCH ()-[r]->() WHERE elementId(r) = $eid DELETE r",
-        {"eid": element_id},
-    )
+    session.delete_relationship_by_id(element_id)
     return {"deleted": True}
 
 
@@ -713,29 +640,27 @@ async def seed_data(with_embeddings: bool = QueryParam(default=False)):
 
 @app.get("/api/nodes/{element_id}/neighbors")
 async def get_neighbors(element_id: str):
-    """Get immediate neighbors of a node using Traversal helper."""
+    """Get immediate neighbors using Query builder."""
     session = get_session()
 
-    # Element ID doesn't directly map to model props, use raw Cypher via session
-    outgoing = session.execute(
-        "MATCH (n)-[r]->(m) WHERE elementId(n) = $eid "
-        "RETURN type(r) AS rel_type, properties(r) AS rel_props, "
-        "elementId(m) AS id, labels(m) AS labels, properties(m) AS props",
-        {"eid": element_id},
-    )
-    incoming = session.execute(
-        "MATCH (m)-[r]->(n) WHERE elementId(n) = $eid "
-        "RETURN type(r) AS rel_type, properties(r) AS rel_props, "
-        "elementId(m) AS id, labels(m) AS labels, properties(m) AS props",
-        {"eid": element_id},
-    )
+    def _neighbor_query(direction: str) -> list[dict]:
+        q = (Query()
+            .match_path((None, "n", None), (None, "r", None), (None, "neighbor", None), direction=direction)
+            .where("elementId(n) = $eid")
+            .return_("elementId(neighbor) AS id", "labels(neighbor) AS labels",
+                     "properties(neighbor) AS props", "type(r) AS rel_type",
+                     "properties(r) AS rel_props"))
+        cypher, params = q.build()
+        params["eid"] = element_id
+        rows = session.execute(cypher, params)
+        for row in rows:
+            if isinstance(row.get("props"), dict):
+                row["props"] = strip_embeddings(row["props"])
+            if isinstance(row.get("rel_props"), dict):
+                row["rel_props"] = strip_embeddings(row["rel_props"])
+        return rows
 
-    for lst in [outgoing, incoming]:
-        for n in lst:
-            if isinstance(n.get("props"), dict):
-                n["props"] = strip_embeddings(n["props"])
-
-    return {"outgoing": outgoing, "incoming": incoming}
+    return {"outgoing": _neighbor_query("out"), "incoming": _neighbor_query("in")}
 
 
 # ---------------------------------------------------------------------------
@@ -768,17 +693,15 @@ async def validate_cypher(req: CypherValidateRequest):
 
 @app.post("/api/traversal/shortest-path")
 async def shortest_path(req: ShortestPathRequest):
-    """Find shortest path between two nodes."""
+    """Find shortest path using Traversal.shortest_path_by_id()."""
     session = get_session()
     try:
-        cypher = (
-            "MATCH path = shortestPath((a)-[*..{max_hops}]-(b)) "
-            "WHERE elementId(a) = $src AND elementId(b) = $tgt "
-            "RETURN path, length(path) AS hops"
-        ).format(max_hops=int(req.max_hops))
-        records = session.execute(cypher, {"src": req.source_id, "tgt": req.target_id})
+        cypher, params = Traversal.shortest_path_by_id(
+            req.source_id, req.target_id, max_depth=int(req.max_hops)
+        )
+        records = session.execute(cypher, params)
         if not records:
-            return {"path": None, "hops": 0, "message": "No path found"}
+            return {"nodes": [], "relationships": [], "hops": 0, "message": "No path found"}
 
         path_data = records[0].get("path")
         hops = records[0].get("hops", 0)
@@ -811,52 +734,39 @@ async def shortest_path(req: ShortestPathRequest):
 
 @app.post("/api/traversal/common-neighbors")
 async def common_neighbors(req: CommonNeighborsRequest):
-    """Find common neighbors between two nodes."""
+    """Find common neighbors using Traversal.common_neighbors_by_id()."""
     session = get_session()
     try:
-        # Use Traversal if we can resolve labels from element IDs
-        cypher = (
-            "MATCH (a)--(common)--(b) "
-            "WHERE elementId(a) = $src AND elementId(b) = $tgt "
-            "AND a <> b AND common <> a AND common <> b "
-            "RETURN DISTINCT elementId(common) AS id, labels(common) AS labels, "
-            "properties(common) AS props"
+        cypher, params = Traversal.common_neighbors_by_id(
+            req.source_id, req.target_id
         )
-        records = session.execute(cypher, {"src": req.source_id, "tgt": req.target_id})
+        records = session.execute(cypher, params)
         for r in records:
-            if isinstance(r.get("props"), dict):
-                r["props"] = strip_embeddings(r["props"])
+            if isinstance(r.get("common"), dict):
+                r["common"] = strip_embeddings(r["common"])
         return {"common_neighbors": records, "count": len(records)}
     except Exception as e:
         raise HTTPException(400, f"Common neighbors query failed: {e}")
 
 
 @app.post("/api/traversal/subgraph")
-async def get_subgraph(element_id: str = "", label: str = "", name: str = "", depth: int = 2):
-    """Get N-hop subgraph around a node using Traversal.subgraph()."""
+async def get_subgraph(req: SubgraphRequest):
+    """Get N-hop subgraph using Query builder."""
     session = get_session()
-    model_cls = MODEL_MAP.get(label)
 
-    if model_cls and name:
-        # Use ORM Traversal
-        key_field = list(model_cls.__fields__.keys())[0]
-        cypher, params = Traversal.subgraph(model_cls, {key_field: name}, depth=depth)
-        records = session.execute(cypher, params)
-        return {"subgraph": records, "depth": depth}
-
-    # Fallback: element ID based
-    if element_id:
-        cypher = (
-            f"MATCH path = (n)-[*1..{int(depth)}]-(m) WHERE elementId(n) = $eid "
-            "RETURN DISTINCT elementId(m) AS id, labels(m) AS labels, properties(m) AS props"
-        )
-        records = session.execute(cypher, {"eid": element_id})
-        for r in records:
-            if isinstance(r.get("props"), dict):
-                r["props"] = strip_embeddings(r["props"])
-        return {"subgraph": records, "depth": depth}
-
-    raise HTTPException(400, "Provide element_id or label+name")
+    q = (Query()
+        .match_path((None, "n", None), (None, None, None), (None, "m", None),
+                     direction="both", min_hops=1, max_hops=req.depth)
+        .where("elementId(n) = $eid")
+        .return_("DISTINCT elementId(m) AS id", "labels(m) AS labels",
+                 "properties(m) AS props"))
+    cypher, params = q.build()
+    params["eid"] = req.element_id
+    nodes = session.execute(cypher, params)
+    for r in nodes:
+        if isinstance(r.get("props"), dict):
+            r["props"] = strip_embeddings(r["props"])
+    return {"subgraph": nodes, "depth": req.depth}
 
 
 # ---------------------------------------------------------------------------
@@ -1100,12 +1010,14 @@ async def bulk_import(req: BulkImportRequest):
     if not req.label.isidentifier():
         raise HTTPException(400, f"Invalid label: {req.label}")
 
-    cypher = (
-        "UNWIND $items AS item "
-        f"CREATE (n:{req.label}) SET n = item "
-        "RETURN count(n) AS created"
-    )
-    result = session.execute(cypher, {"items": req.items})
+    q = (Query()
+        .unwind("$items", "item")
+        .create(req.label, "n")
+        .set("n = item")
+        .return_("count(n) AS created"))
+    cypher, params = q.build()
+    params["items"] = req.items
+    result = session.execute(cypher, params)
     count = result[0]["created"] if result else 0
     return {"created": count, "label": req.label, "method": "raw_unwind"}
 

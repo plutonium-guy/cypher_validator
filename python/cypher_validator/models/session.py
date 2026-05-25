@@ -649,6 +649,107 @@ class GraphSession:
         vector = embedding_fn(query)
         return self.vector_search(model, index_property, vector, top_k)
 
+    # ------------------------------------------------------------------
+    # Element-ID-based relationship CRUD
+    # ------------------------------------------------------------------
+
+    def create_relationship_by_id(
+        self,
+        src_id: str,
+        tgt_id: str,
+        rel_type: str,
+        props: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Create a relationship between two nodes identified by element IDs."""
+        params: dict[str, Any] = {"src": src_id, "tgt": tgt_id}
+        set_clause = ""
+        if props:
+            set_parts = []
+            for i, (k, v) in enumerate(props.items()):
+                pname = f"rp{i}"
+                set_parts.append(f"r.{k} = ${pname}")
+                params[pname] = v
+            set_clause = " SET " + ", ".join(set_parts)
+
+        cypher = (
+            "MATCH (a) WHERE elementId(a) = $src "
+            "MATCH (b) WHERE elementId(b) = $tgt "
+            f"CREATE (a)-[r:{rel_type}]->(b){set_clause} "
+            "RETURN elementId(r) AS id, type(r) AS type, "
+            "elementId(a) AS source, elementId(b) AS target, properties(r) AS props"
+        )
+        return self.execute(cypher, params)
+
+    def update_relationship_by_id(
+        self,
+        element_id: str,
+        props: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Update relationship properties by element ID."""
+        params: dict[str, Any] = {"eid": element_id}
+        set_parts = []
+        for i, (k, v) in enumerate(props.items()):
+            pname = f"rp{i}"
+            set_parts.append(f"r.{k} = ${pname}")
+            params[pname] = v
+
+        set_clause = ", ".join(set_parts)
+        cypher = (
+            "MATCH ()-[r]->() WHERE elementId(r) = $eid "
+            f"SET {set_clause} "
+            "RETURN elementId(r) AS id, type(r) AS type, properties(r) AS props"
+        )
+        return self.execute(cypher, params)
+
+    def delete_relationship_by_id(
+        self,
+        element_id: str,
+    ) -> list[dict[str, Any]]:
+        """Delete a relationship by element ID."""
+        return self.execute(
+            "MATCH ()-[r]->() WHERE elementId(r) = $eid "
+            "DELETE r RETURN count(*) AS deleted",
+            {"eid": element_id},
+        )
+
+    # ------------------------------------------------------------------
+    # Graph-level queries
+    # ------------------------------------------------------------------
+
+    def fetch_graph(
+        self,
+        node_limit: int = 500,
+        rel_limit: int | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Fetch all nodes and relationships for visualization."""
+        if rel_limit is None:
+            rel_limit = node_limit * 3
+        nodes = self.execute(
+            "MATCH (n) "
+            "RETURN elementId(n) AS id, labels(n) AS labels, properties(n) AS props "
+            "LIMIT $limit",
+            {"limit": node_limit},
+        )
+        rels = self.execute(
+            "MATCH (a)-[r]->(b) "
+            "RETURN elementId(r) AS id, type(r) AS type, "
+            "elementId(a) AS source, elementId(b) AS target, "
+            "properties(r) AS props "
+            "LIMIT $limit",
+            {"limit": rel_limit},
+        )
+        return {"nodes": nodes, "relationships": rels}
+
+    def count_nodes(self) -> int:
+        """Return total node count."""
+        result = self.execute("MATCH (n) RETURN count(n) AS total")
+        return result[0]["total"] if result else 0
+
+    def count_relationships(self) -> int:
+        """Return total relationship count."""
+        result = self.execute("MATCH ()-[r]->() RETURN count(r) AS total")
+        return result[0]["total"] if result else 0
+
     def apply_ddl(self, include_existence: bool = False) -> list[str]:
         """Apply all schema DDL (constraints + indexes) to the database.
 

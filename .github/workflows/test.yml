@@ -63,7 +63,8 @@ jobs:
           . .venv/bin/activate
           uv pip install \
               maturin pytest pytest-asyncio pydantic \
-              neo4j openai anthropic langchain-core
+              neo4j openai anthropic langchain-core \
+              hypothesis typer
 
       - name: Build PyO3 extension
         run: |
