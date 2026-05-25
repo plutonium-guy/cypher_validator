@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import os
 import re
 import time
@@ -202,19 +201,6 @@ Fix it and return ONLY the corrected query inside a ```cypher code fence.
 
 Schema:
 {schema_context}
-
-Query:
-```cypher
-{cypher}
-```
-
-Errors:
-{error_list}
-"""
-
-_REPAIR_PROMPT_NO_SCHEMA = """\
-The Cypher query below has validation errors. \
-Fix it and return ONLY the corrected query inside a ```cypher code fence.
 
 Query:
 ```cypher
@@ -566,13 +552,13 @@ class LLMNLToCypher:
     def __enter__(self) -> "LLMNLToCypher":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *_args: Any) -> None:
         self.close()
 
     async def __aenter__(self) -> "LLMNLToCypher":
         return self
 
-    async def __aexit__(self, *args: Any) -> None:
+    async def __aexit__(self, *_args: Any) -> None:
         self.close()
 
     # ------------------------------------------------------------------
@@ -1707,92 +1693,5 @@ def _build_langchain_fn(chat_model: Any) -> Callable[[str], str]:
         result = chat_model.invoke(messages)
         # LangChain returns an AIMessage; .content is the text.
         return result.content if hasattr(result, "content") else str(result)
-
-    return call_llm
-
-
-# ---------------------------------------------------------------------------
-# Async SDK adapters
-# ---------------------------------------------------------------------------
-
-def _build_async_openai_fn(
-    model: str,
-    base_url: Optional[str],
-    api_key: Optional[str],
-    temperature: float,
-) -> Callable[[str], Awaitable[str]]:
-    """Build an async ``(prompt) -> str`` callable backed by ``AsyncOpenAI``."""
-    try:
-        from openai import AsyncOpenAI
-    except ImportError as exc:
-        raise ImportError(
-            "The 'openai' package is required for async OpenAI support.  "
-            "Install it with: pip install openai"
-        ) from exc
-
-    kwargs: Dict[str, Any] = {}
-    if base_url is not None:
-        kwargs["base_url"] = base_url
-    if api_key is not None:
-        kwargs["api_key"] = api_key
-
-    client = AsyncOpenAI(**kwargs)
-
-    async def call_llm(prompt: str) -> str:
-        messages = _split_prompt_to_messages(prompt)
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-        )
-        return response.choices[0].message.content or ""
-
-    return call_llm
-
-
-def _build_async_anthropic_fn(
-    model: str,
-    api_key: Optional[str],
-    temperature: float,
-) -> Callable[[str], Awaitable[str]]:
-    """Build an async ``(prompt) -> str`` callable backed by ``AsyncAnthropic``."""
-    try:
-        import anthropic
-    except ImportError as exc:
-        raise ImportError(
-            "The 'anthropic' package is required for async Anthropic support.  "
-            "Install it with: pip install anthropic"
-        ) from exc
-
-    kwargs: Dict[str, Any] = {}
-    if api_key is not None:
-        kwargs["api_key"] = api_key
-
-    client = anthropic.AsyncAnthropic(**kwargs)
-
-    async def call_llm(prompt: str) -> str:
-        messages = _split_prompt_to_messages(prompt)
-        system_text = ""
-        user_messages = []
-        for msg in messages:
-            if msg["role"] == "system":
-                system_text = msg["content"]
-            else:
-                user_messages.append(msg)
-        if not user_messages:
-            user_messages = [{"role": "user", "content": prompt}]
-
-        create_kwargs: Dict[str, Any] = {
-            "model": model,
-            "max_tokens": 4096,
-            "messages": user_messages,
-        }
-        if system_text:
-            create_kwargs["system"] = system_text
-        if temperature > 0:
-            create_kwargs["temperature"] = temperature
-
-        response = await client.messages.create(**create_kwargs)
-        return response.content[0].text
 
     return call_llm

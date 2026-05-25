@@ -59,33 +59,6 @@ def _to_cypher_rel_type(rel_type: str) -> str:
     return rel_type.upper()
 
 
-def _inline_params(cypher: str, params: Dict[str, Any]) -> str:
-    """Substitute ``$placeholder`` tokens in *cypher* with their literal values.
-
-    Produces a human-readable Cypher string with actual entity values instead
-    of parameter references.  String values are double-quoted and internal
-    double-quotes / backslashes are escaped.  Non-string scalars (int, float,
-    bool, None) are rendered without quotes.
-
-    The substitution is applied longest-key-first to avoid partial replacement
-    (e.g. ``$a10_val`` must be replaced before ``$a1_val``).
-    """
-    result = cypher
-    for key in sorted(params.keys(), key=len, reverse=True):
-        val = params[key]
-        if val is None:
-            inline = "null"
-        elif isinstance(val, bool):
-            inline = "true" if val else "false"
-        elif isinstance(val, (int, float)):
-            inline = str(val)
-        else:
-            escaped = str(val).replace("\\", "\\\\").replace('"', '\\"')
-            inline = f'"{escaped}"'
-        result = result.replace(f"${key}", inline)
-    return result
-
-
 # ---------------------------------------------------------------------------
 # Neo4jDatabase
 # ---------------------------------------------------------------------------
@@ -384,7 +357,7 @@ class Neo4jDatabase:
     def __enter__(self) -> "Neo4jDatabase":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *_args: Any) -> None:
         self.close()
 
     def __repr__(self) -> str:
@@ -1001,7 +974,7 @@ class EntityNERExtractor:
 
     # ------------------------------------------------------------------
 
-    def extract(self, text: str) -> List[Dict[str, str]]:
+    def extract(self, text: str) -> List[Dict[str, Any]]:
         """Extract named entities from *text*.
 
         Parameters
@@ -1022,7 +995,7 @@ class EntityNERExtractor:
         else:
             raise ValueError(f"Unknown backend: {self._backend!r}")
 
-    def _extract_spacy(self, text: str) -> List[Dict[str, str]]:
+    def _extract_spacy(self, text: str) -> List[Dict[str, Any]]:
         doc = self._model(text)
         return [
             {
@@ -1032,7 +1005,7 @@ class EntityNERExtractor:
             for ent in doc.ents
         ]
 
-    def _extract_transformers(self, text: str) -> List[Dict[str, str]]:
+    def _extract_transformers(self, text: str) -> List[Dict[str, Any]]:
         raw = self._model(text)
         results = []
         for ent in raw:
@@ -1470,6 +1443,7 @@ class NLToCypher:
         ner_labels: Dict[str, str] = {}
         strict_ner = self.ner_extractor is not None
         if strict_ner:
+            assert self.ner_extractor is not None
             for ent in self.ner_extractor.extract(text):
                 ner_labels[ent["text"]] = ent["label"]
 
